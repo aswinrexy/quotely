@@ -99,6 +99,34 @@ export const api = {
   },
 };
 
+/**
+ * Customer-facing calls. The share token in the URL is the only credential, so these requests
+ * deliberately carry no Authorization header — an owner browsing their own link must not have
+ * their session implicitly involved — and a 401/404 here never signs anyone out.
+ */
+export const publicApi = {
+  async request<T>(path: string, init: RequestInit = {}): Promise<T> {
+    const headers = new Headers(init.headers);
+    if (!headers.has("Content-Type") && init.body) headers.set("Content-Type", "application/json");
+
+    let response: Response;
+    try {
+      response = await fetch(`${API_BASE_URL}${path}`, { ...init, headers });
+    } catch {
+      throw new ApiError("Cannot reach the server. Please check your connection and try again.", 0);
+    }
+
+    if (!response.ok) throw await toError(response);
+    return (await response.json()) as T;
+  },
+
+  get: <T>(path: string) => publicApi.request<T>(path),
+  post: <T>(path: string, body: unknown) =>
+    publicApi.request<T>(path, { method: "POST", body: JSON.stringify(body) }),
+
+  pdfUrl: (token: string) => `${API_BASE_URL}/api/public/quotations/${encodeURIComponent(token)}/pdf`,
+};
+
 export function saveBlob(blob: Blob, fileName: string) {
   const url = window.URL.createObjectURL(blob);
   const link = document.createElement("a");

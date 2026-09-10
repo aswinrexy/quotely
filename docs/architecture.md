@@ -52,6 +52,11 @@ AppUser (Identity)
                └── Product (N:1, optional, set null on delete)
 ```
 
+`Quotations` additionally carries the V2.1 share-link columns — `PublicTokenHash` (unique),
+`PublicLinkCreatedAt` — and the customer's answer: `RespondedAt`, `RespondedByName`,
+`RespondedByEmail`, `ResponseComment`. The response lives on the quotation rather than on the
+`Customer` record, because whoever replies is not necessarily the stored contact.
+
 Every tenant-owned table carries a `UserId` foreign key. `CreatedAt` / `UpdatedAt` are stamped
 centrally in `AppDbContext.SaveChanges`.
 
@@ -65,6 +70,7 @@ Indexes:
 | Quotations | `(UserId, QuotationNumber)` unique | numbers unique per business |
 | Quotations | `(UserId, Sequence)` unique | allocation of the next number |
 | Quotations | `(UserId, Status)` | dashboard counts and status filter |
+| Quotations | `PublicTokenHash` unique, filtered | share-link lookup; many rows have no link |
 | QuotationItems | `QuotationId` | item loading |
 
 Money uses `decimal(18,2)`, quantities `decimal(18,3)` and tax rates `decimal(5,2)`. No monetary
@@ -147,6 +153,54 @@ frontend/quotely-web/
 The token and user are held in `localStorage` and attached by the API client. A `401` from any
 request clears the session and redirects to `/login`. The `(app)` layout guards every
 authenticated route.
+
+## Customer-facing share links (V2.1)
+
+A business owner can hand a customer one URL — `/q/{token}` — that shows the quotation and lets
+them accept or reject it without a Quotely account.
+
+```
+Owner (JWT)                          Customer (no account)
+   │                                        │
+   ├─ POST /api/quotations/{id}/public-link │
+   │     random 32 bytes → token            │
+   │     SHA-256(token) → Quotations.PublicTokenHash
+   │     returns https://…/q/{token} ───────┤
+   │                                        ├─ GET  /api/public/quotations/{token}
+   │                                        ├─ POST …/accept   or   …/reject
+   │                                        │        server sets status + RespondedAt
+   ├─ GET /api/quotations/{id} ─────────────┘        (never trusts the payload)
+   └─ sees Accepted/Rejected, who answered, and their comment
+```
+
+**The token.** 32 bytes from `RandomNumberGenerator`, URL-safe base64 (43 characters, 256 bits of
+entropy), so enumeration is not feasible. It is a bearer capability: anyone with the URL can view
+and answer that one quotation, and nothing else.
+
+**Storage.** Only `SHA-256(token)` is persisted, in `Quotations.PublicTokenHash` behind a unique
+index. A stolen database backup therefore yields no working links. The consequence, accepted
+deliberately, is that the URL cannot be shown twice — the owner copies it when it is created, and
+asking for a link again issues a fresh one and retires the previous URL. That doubles as link
+revocation, and the UI warns before replacing.
+
+**Lookup.** The incoming token is hashed and matched against that unique index, so a token can
+never resolve to a different quotation. Anything unknown is a plain `404`.
+
+**What the customer may do.** Nothing but answer once. The decision comes from the route, not the
+payload; amounts, line items and status are never read from the request. `Accepted` and `Rejected`
+are terminal (`409` on a second attempt), and a quotation past its `ValidUntil` can be viewed but
+not answered — reusing the existing date rather than adding a second expiry mechanism. Editing a
+quotation leaves its link and any recorded response intact.
+
+**Data shown.** `PublicQuotationDto` is a separate contract from the owner's `QuotationDto`: no
+user, business, customer or quotation ids, and no token material. Totals come from the stored
+server-calculated columns.
+
+**Logging.** `ExceptionHandlingMiddleware` redacts the token segment of `/api/public/quotations/…`
+before any path reaches the log, so log readers never obtain working links.
+
+Not built for V2.1, and reasonable next steps: a link expiry or explicit revoke button separate
+from replacement, and rate limiting on the public endpoints.
 
 ## Extension points left open for V2
 

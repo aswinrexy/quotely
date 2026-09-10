@@ -12,6 +12,7 @@ import { ConfirmDialog } from "@/components/ui/dialog";
 import { StatusBadge } from "@/components/ui/badge";
 import { ErrorState, LoadingState } from "@/components/ui/states";
 import { PageHeader } from "@/components/app/page-header";
+import { ShareLinkCard } from "@/components/app/share-link-card";
 import type { Quotation } from "@/types";
 
 export default function QuotationDetailPage() {
@@ -34,6 +35,19 @@ export default function QuotationDetailPage() {
       setError(err instanceof Error ? err.message : "Could not load the quotation.");
     } finally {
       setLoading(false);
+    }
+  }, [id]);
+
+  /**
+   * Refreshes the quotation in place, without the loading state. The share panel keeps the
+   * generated URL in its own state, and that URL can never be fetched again — so a refresh that
+   * unmounted the panel would throw the link away before the owner could copy it.
+   */
+  const refresh = useCallback(async () => {
+    try {
+      setQuotation(await api.get<Quotation>(`/api/quotations/${id}`));
+    } catch {
+      // A failed background refresh leaves the page on the data it already has.
     }
   }, [id]);
 
@@ -120,6 +134,10 @@ export default function QuotationDetailPage() {
           </>
         }
       />
+
+      <div className="mb-6">
+        <ShareLinkCard quotation={quotation} onChanged={refresh} />
+      </div>
 
       {/* Browser preview that mirrors the generated PDF. */}
       <Card className="overflow-hidden">

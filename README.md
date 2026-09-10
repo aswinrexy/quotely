@@ -57,6 +57,7 @@ variables, and (in development) user secrets. Environment variables use `__` for
 | `Jwt:Issuer` / `Jwt:Audience` | `JWT__ISSUER` / `JWT__AUDIENCE` | Default `Quotely` / `QuotelyWeb` |
 | `Jwt:AccessTokenMinutes` | `JWT__ACCESSTOKENMINUTES` | Access-token lifetime, default 120 |
 | `Cors:AllowedOrigins:0` | `CORS__ALLOWEDORIGINS__0` | Frontend origin, default `http://localhost:3000` |
+| `PublicLinks:BaseUrl` | `PUBLICLINKS__BASEURL` | Origin used to build customer share links, default `http://localhost:3000` |
 | `Seed:Enabled` | `SEED__ENABLED` | Seed demo data (default: on in Development) |
 
 The frontend needs one variable, in `frontend/quotely-web/.env.local`:
@@ -181,6 +182,21 @@ To reseed from scratch under SQLite, delete `backend/Quotely.Api/quotely.dev.db`
 PDFs are never stored — they are rendered on demand from the current quotation data, so a PDF
 always matches what is in the database. Money is stored and calculated with `decimal`
 (never floating point), and totals are always recalculated server-side before saving or printing.
+
+## Customer-facing quotation links
+
+From a quotation's details page, **Generate share link** produces a URL such as
+`http://localhost:3000/q/7f9c2a…`. The customer opens it with no account, reviews the quotation and
+accepts or rejects it; the owner sees the outcome, who answered and their comment.
+
+The token is 32 cryptographically random bytes and only its SHA-256 hash is stored, so the URL is
+shown exactly once — copy it when it appears. Creating a new link retires the previous one, which
+is how a link is revoked today. A `Draft` quotation becomes `Sent` when it is shared, an answered
+quotation cannot be answered again, and a quotation past its valid-until date can be viewed but not
+accepted or rejected.
+
+See [docs/api.md](docs/api.md) for the endpoints and [docs/architecture.md](docs/architecture.md)
+for the security model.
 
 ## Documentation
 

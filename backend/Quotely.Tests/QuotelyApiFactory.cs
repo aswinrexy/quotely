@@ -55,6 +55,18 @@ public class QuotelyApiFactory : WebApplicationFactory<Program>, IAsyncLifetime
         await base.DisposeAsync();
     }
 
+    /// <summary>
+    /// Reads straight from the database so tests can assert on columns the API never exposes,
+    /// such as the stored public token hash.
+    /// </summary>
+    public async Task<T> ReadQuotationAsync<T>(Guid quotationId, Func<Quotely.Api.Models.Quotation, T> select)
+    {
+        using var scope = Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var quotation = await db.Quotations.AsNoTracking().FirstAsync(q => q.Id == quotationId);
+        return select(quotation);
+    }
+
     /// <summary>Registers a fresh account and returns a client already carrying its bearer token.</summary>
     public async Task<HttpClient> CreateSignedInClientAsync(string? email = null)
     {

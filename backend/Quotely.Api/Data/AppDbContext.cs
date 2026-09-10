@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Identity.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Quotely.Api.Models;
 
 namespace Quotely.Api.Data;
@@ -15,9 +16,32 @@ public class AppDbContext : IdentityDbContext<AppUser, IdentityRole<Guid>, Guid>
     public DbSet<Quotation> Quotations => Set<Quotation>();
     public DbSet<QuotationItem> QuotationItems => Set<QuotationItem>();
 
+    /// <summary>
+    /// Neither SQL Server's datetime2 nor SQLite stores a timezone, so values read back arrive as
+    /// DateTimeKind.Unspecified and serialize without a "Z" — which a browser then reads as local
+    /// time, shifting displayed dates. Everything we store is UTC, so say so on the way out.
+    /// </summary>
+    private static readonly ValueConverter<DateTime, DateTime> UtcConverter = new(
+        toDatabase => toDatabase.Kind == DateTimeKind.Local ? toDatabase.ToUniversalTime() : toDatabase,
+        fromDatabase => DateTime.SpecifyKind(fromDatabase, DateTimeKind.Utc));
+
+    private static readonly ValueConverter<DateTime?, DateTime?> NullableUtcConverter = new(
+        toDatabase => toDatabase.HasValue && toDatabase.Value.Kind == DateTimeKind.Local
+            ? toDatabase.Value.ToUniversalTime()
+            : toDatabase,
+        fromDatabase => fromDatabase.HasValue
+            ? DateTime.SpecifyKind(fromDatabase.Value, DateTimeKind.Utc)
+            : fromDatabase);
+
     protected override void OnModelCreating(ModelBuilder b)
     {
         base.OnModelCreating(b);
+
+        foreach (var property in b.Model.GetEntityTypes().SelectMany(t => t.GetProperties()))
+        {
+            if (property.ClrType == typeof(DateTime)) property.SetValueConverter(UtcConverter);
+            else if (property.ClrType == typeof(DateTime?)) property.SetValueConverter(NullableUtcConverter);
+        }
 
         b.Entity<BusinessProfile>(e =>
         {
@@ -71,6 +95,13 @@ public class AppDbContext : IdentityDbContext<AppUser, IdentityRole<Guid>, Guid>
             e.HasIndex(x => new { x.UserId, x.Sequence }).IsUnique();
             e.HasIndex(x => new { x.UserId, x.Status });
             e.Property(x => x.QuotationNumber).HasMaxLength(30).IsRequired();
+            // Lookup key for the public customer link. Unique so a hash collision or a
+            // duplicated token can never resolve to two quotations.
+            e.Property(x => x.PublicTokenHash).HasMaxLength(64);
+            e.HasIndex(x => x.PublicTokenHash).IsUnique();
+            e.Property(x => x.RespondedByName).HasMaxLength(150);
+            e.Property(x => x.RespondedByEmail).HasMaxLength(256);
+            e.Property(x => x.ResponseComment).HasMaxLength(1000);
             e.Property(x => x.Notes).HasMaxLength(2000);
             e.Property(x => x.Terms).HasMaxLength(4000);
             e.Property(x => x.Subtotal).HasPrecision(18, 2);

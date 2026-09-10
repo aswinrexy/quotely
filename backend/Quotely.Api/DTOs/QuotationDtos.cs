@@ -30,6 +30,8 @@ public record QuotationListItemDto
     public string Status { get; init; } = nameof(QuotationStatus.Draft);
     public decimal GrandTotal { get; init; }
     public string Currency { get; init; } = "INR";
+    /// <summary>Set when the customer answered through the share link.</summary>
+    public DateTime? RespondedAt { get; init; }
 }
 
 public record QuotationDto
@@ -49,6 +51,19 @@ public record QuotationDto
     public decimal GrandTotal { get; init; }
     public string Currency { get; init; } = "INR";
     public IReadOnlyList<QuotationItemDto> Items { get; init; } = Array.Empty<QuotationItemDto>();
+
+    // ---- customer share link (V2.1) ----
+    /// <summary>Whether a share link is currently active. The URL itself cannot be shown again:
+    /// only the token hash is stored, so re-sharing issues a new link.</summary>
+    public bool HasPublicLink { get; init; }
+    public DateTime? PublicLinkCreatedAt { get; init; }
+
+    // ---- what the customer answered ----
+    public DateTime? RespondedAt { get; init; }
+    public string? RespondedByName { get; init; }
+    public string? RespondedByEmail { get; init; }
+    public string? ResponseComment { get; init; }
+
     public DateTime CreatedAt { get; init; }
     public DateTime UpdatedAt { get; init; }
 }

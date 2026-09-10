@@ -178,6 +178,9 @@ export default function QuotationsPage() {
                       <Td>{formatDate(quotation.validUntil)}</Td>
                       <Td>
                         <StatusBadge status={quotation.status} />
+                        {quotation.respondedAt && (
+                          <p className="mt-1 text-xs text-slate-500">{formatDate(quotation.respondedAt)}</p>
+                        )}
                       </Td>
                       <Td align="right" className="font-medium text-slate-900">
                         {formatMoney(quotation.grandTotal, quotation.currency)}

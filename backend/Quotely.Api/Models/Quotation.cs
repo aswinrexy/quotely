@@ -27,8 +27,29 @@ public class Quotation
     public decimal TaxTotal { get; set; }
     public decimal GrandTotal { get; set; }
 
+    // ---- customer-facing share link (V2.1) ----------------------------
+    // Only the SHA-256 hash of the public token is persisted; the raw token exists once,
+    // in the response that creates the link. Regenerating replaces the hash, which
+    // invalidates the previous link.
+    public string? PublicTokenHash { get; set; }
+    public DateTime? PublicLinkCreatedAt { get; set; }
+
+    // ---- customer response captured through the public link ------------
+    // Kept on the quotation rather than written back onto the Customer record:
+    // the person who responds is not necessarily the stored contact.
+    public DateTime? RespondedAt { get; set; }
+    public string? RespondedByName { get; set; }
+    public string? RespondedByEmail { get; set; }
+    public string? ResponseComment { get; set; }
+
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
 
     public ICollection<QuotationItem> Items { get; set; } = new List<QuotationItem>();
+
+    /// <summary>A quotation past its valid-until date is closed to customer responses.</summary>
+    public bool IsExpired(DateOnly today) => ValidUntil < today;
+
+    /// <summary>Accepted and Rejected are terminal: the public page cannot change them again.</summary>
+    public bool HasResponded => Status is QuotationStatus.Accepted or QuotationStatus.Rejected;
 }

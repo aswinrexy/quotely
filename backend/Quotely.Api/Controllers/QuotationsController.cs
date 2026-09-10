@@ -13,13 +13,20 @@ namespace Quotely.Api.Controllers;
 public class QuotationsController : ControllerBase
 {
     private readonly IQuotationService _quotations;
+    private readonly IPublicQuotationService _publicQuotations;
     private readonly IPdfService _pdf;
     private readonly AppDbContext _db;
     private readonly ICurrentUser _currentUser;
 
-    public QuotationsController(IQuotationService quotations, IPdfService pdf, AppDbContext db, ICurrentUser currentUser)
+    public QuotationsController(
+        IQuotationService quotations,
+        IPublicQuotationService publicQuotations,
+        IPdfService pdf,
+        AppDbContext db,
+        ICurrentUser currentUser)
     {
         _quotations = quotations;
+        _publicQuotations = publicQuotations;
         _pdf = pdf;
         _db = db;
         _currentUser = currentUser;
@@ -56,6 +63,16 @@ public class QuotationsController : ControllerBase
         await _quotations.DeleteAsync(_currentUser.Id, id, ct);
         return NoContent();
     }
+
+    /// <summary>
+    /// Creates the customer-facing share link for one of the caller's quotations and returns the
+    /// full URL. The raw token is only ever present in this response — the database keeps a hash —
+    /// so calling this again issues a fresh link and retires the previous one.
+    /// </summary>
+    [HttpPost("{id:guid}/public-link")]
+    [ProducesResponseType(typeof(PublicQuotationLinkDto), StatusCodes.Status200OK)]
+    public async Task<ActionResult<PublicQuotationLinkDto>> CreatePublicLink(Guid id, CancellationToken ct)
+        => Ok(await _publicQuotations.CreateLinkAsync(_currentUser.Id, id, ct));
 
     /// <summary>Generates the PDF on the fly. Nothing is stored server-side.</summary>
     [HttpPost("{id:guid}/pdf")]

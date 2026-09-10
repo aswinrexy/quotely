@@ -85,6 +85,7 @@ export interface QuotationListItem {
   status: QuotationStatus;
   grandTotal: number;
   currency: string;
+  respondedAt?: string | null;
 }
 
 export interface Quotation {
@@ -103,6 +104,12 @@ export interface Quotation {
   grandTotal: number;
   currency: string;
   items: QuotationItem[];
+  hasPublicLink: boolean;
+  publicLinkCreatedAt?: string | null;
+  respondedAt?: string | null;
+  respondedByName?: string | null;
+  respondedByEmail?: string | null;
+  responseComment?: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -143,4 +150,75 @@ export interface SaveQuotationRequest {
   terms?: string | null;
   status?: QuotationStatus;
   items: SaveQuotationItemRequest[];
+}
+
+// ---- V2.1 customer-facing share link ----------------------------------
+
+export interface PublicQuotationLink {
+  url: string;
+  createdAt: string;
+}
+
+export interface PublicQuotationItem {
+  name: string;
+  description?: string | null;
+  unit: string;
+  quantity: number;
+  unitPrice: number;
+  discount: number;
+  taxRate: number;
+  lineTotal: number;
+}
+
+export interface PublicQuotationBusiness {
+  businessName: string;
+  email?: string | null;
+  phone?: string | null;
+  addressLine?: string | null;
+  city?: string | null;
+  state?: string | null;
+  postalCode?: string | null;
+  country?: string | null;
+  taxNumber?: string | null;
+  logoUrl?: string | null;
+}
+
+export interface PublicQuotationCustomer {
+  name: string;
+  companyName?: string | null;
+  email?: string | null;
+  phone?: string | null;
+  addressLine?: string | null;
+  city?: string | null;
+  state?: string | null;
+  postalCode?: string | null;
+  country?: string | null;
+}
+
+/** Mirrors PublicQuotationDto: no internal identifiers of any kind. */
+export interface PublicQuotation {
+  quotationNumber: string;
+  quotationDate: string;
+  validUntil: string;
+  business: PublicQuotationBusiness;
+  customer: PublicQuotationCustomer;
+  items: PublicQuotationItem[];
+  subtotal: number;
+  discountTotal: number;
+  taxTotal: number;
+  grandTotal: number;
+  currency: string;
+  notes?: string | null;
+  terms?: string | null;
+  status: QuotationStatus;
+  isExpired: boolean;
+  canRespond: boolean;
+  respondedAt?: string | null;
+  respondedByName?: string | null;
+}
+
+export interface PublicResponseRequest {
+  name: string;
+  email?: string | null;
+  comment?: string | null;
 }

@@ -150,6 +150,7 @@ Only `name` is required. Paged responses look like:
 | `PUT` | `/api/quotations/{id}` | Replaces the item set; the number never changes |
 | `DELETE` | `/api/quotations/{id}` | `204 No Content` |
 | `POST`/`GET` | `/api/quotations/{id}/pdf` | Returns `application/pdf` |
+| `POST` | `/api/quotations/{id}/public-link` | Creates the customer share link (see below) |
 
 ### Create / update payload
 
@@ -247,6 +248,98 @@ Content-Disposition: attachment; filename=QT-000001-John-Smith.pdf
 ```
 
 `Content-Disposition` is included in the CORS exposed headers so the browser can read the filename.
+
+### `POST /api/quotations/{id}/public-link`
+
+Creates the customer-facing share link for one of the caller's own quotations.
+
+```json
+{ "url": "https://quotely.app/q/7f9c2a…", "createdAt": "2026-09-11T09:14:00Z" }
+```
+
+Only a SHA-256 hash of the token is stored, so **this response is the one and only time the URL
+exists**. Calling the endpoint again mints a new token and the previously shared URL stops working
+— which is also how a link is revoked. A `Draft` quotation becomes `Sent`; any other status is left
+as it is. Another user's quotation returns `404`.
+
+The owner's quotation DTO carries `hasPublicLink` and `publicLinkCreatedAt` so the UI can show that
+a link is active, plus `respondedAt`, `respondedByName`, `respondedByEmail` and `responseComment`
+once the customer has answered.
+
+## Public quotation API (no authentication)
+
+These endpoints are anonymous by design. The share token in the path **is** the authorization: it
+grants access to exactly one quotation. There is no listing endpoint, and no route accepts an
+internal identifier.
+
+| Method | Path | Notes |
+| ------ | ---- | ----- |
+| `GET` | `/api/public/quotations/{token}` | The customer-safe view of the quotation |
+| `POST` | `/api/public/quotations/{token}/accept` | Records an acceptance |
+| `POST` | `/api/public/quotations/{token}/reject` | Records a rejection |
+| `GET` | `/api/public/quotations/{token}/pdf` | The same PDF the owner downloads |
+
+### `GET /api/public/quotations/{token}`
+
+```json
+{
+  "quotationNumber": "QT-000001",
+  "quotationDate": "2026-09-11",
+  "validUntil": "2026-09-25",
+  "business": { "businessName": "ABC Electricals", "phone": "…", "email": "…", "logoUrl": null },
+  "customer": { "name": "John Smith", "companyName": "John Smith Construction" },
+  "items": [
+    {
+      "name": "AC Installation",
+      "unit": "Service",
+      "quantity": 2,
+      "unitPrice": 5000.00,
+      "discount": 500.00,
+      "taxRate": 18.00,
+      "lineTotal": 11210.00
+    }
+  ],
+  "subtotal": 11500.00,
+  "discountTotal": 500.00,
+  "taxTotal": 1980.00,
+  "grandTotal": 12980.00,
+  "currency": "INR",
+  "notes": "…",
+  "terms": "…",
+  "status": "Sent",
+  "isExpired": false,
+  "canRespond": true,
+  "respondedAt": null,
+  "respondedByName": null
+}
+```
+
+The payload deliberately contains **no** database identifiers — no quotation id, user id or
+customer id — and nothing about the token. Totals are the stored, server-calculated values; the
+customer page renders them as-is and never recalculates.
+
+An unknown, malformed or retired token returns a plain `404` that reveals nothing about which
+quotations exist.
+
+### `POST /api/public/quotations/{token}/accept` and `/reject`
+
+```json
+{
+  "name": "John Smith",
+  "email": "john@example.com",
+  "comment": "Approved. Please proceed."
+}
+```
+
+`name` is required (max 150). `email` is optional but must be well formed. `comment` is optional,
+max 1000 characters. The decision comes from the route — a `status`, total or item list in the body
+is ignored. On success the updated public DTO is returned.
+
+| Case | Response |
+| ---- | -------- |
+| Already accepted or rejected | `409` — the first answer stands |
+| Past its `validUntil` date | `409` — expired quotations can be viewed but not answered |
+| Missing name / bad email / oversized comment | `400` |
 
 ## Health
 

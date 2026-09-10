@@ -1,5 +1,6 @@
 using System.Net;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using Microsoft.EntityFrameworkCore;
 
 namespace Quotely.Api.Middleware;
@@ -29,10 +30,12 @@ public class ExceptionHandlingMiddleware
         {
             var (status, message) = Map(ex);
 
+            var path = Redact(context.Request.Path);
+
             if (status == HttpStatusCode.InternalServerError)
-                _logger.LogError(ex, "Unhandled exception on {Method} {Path}", context.Request.Method, context.Request.Path);
+                _logger.LogError(ex, "Unhandled exception on {Method} {Path}", context.Request.Method, path);
             else
-                _logger.LogInformation("Request failed ({Status}) on {Path}: {Message}", (int)status, context.Request.Path, ex.Message);
+                _logger.LogInformation("Request failed ({Status}) on {Path}: {Message}", (int)status, path, ex.Message);
 
             if (context.Response.HasStarted) throw;
 
@@ -42,6 +45,22 @@ public class ExceptionHandlingMiddleware
             await context.Response.WriteAsync(
                 JsonSerializer.Serialize(new { message, status = (int)status }, JsonOptions));
         }
+    }
+
+    /// <summary>
+    /// Public share tokens appear in the URL, so the path must never reach the log verbatim:
+    /// a log reader would otherwise hold working links to customers' quotations.
+    /// </summary>
+    private static string Redact(PathString path)
+    {
+        var value = path.Value;
+        if (string.IsNullOrEmpty(value)) return string.Empty;
+
+        return Regex.Replace(
+            value,
+            @"(?<prefix>/api/public/quotations/)(?<token>[^/]+)",
+            "${prefix}[redacted]",
+            RegexOptions.IgnoreCase);
     }
 
     private static (HttpStatusCode, string) Map(Exception ex) => ex switch

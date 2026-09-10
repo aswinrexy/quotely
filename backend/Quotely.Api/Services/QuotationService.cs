@@ -61,7 +61,8 @@ public class QuotationService : IQuotationService
                 ValidUntil = q.ValidUntil,
                 Status = q.Status.ToString(),
                 GrandTotal = q.GrandTotal,
-                Currency = currency
+                Currency = currency,
+                RespondedAt = q.RespondedAt
             })
             .ToListAsync(ct);
 
@@ -122,6 +123,8 @@ public class QuotationService : IQuotationService
         quotation.Notes = request.Notes;
         quotation.Terms = request.Terms;
         quotation.Status = ParseStatus(request.Status, quotation.Status);
+        // The share link and any recorded customer response are deliberately untouched here:
+        // editing a quotation must not silently revoke a link the customer already has.
 
         // An edit replaces the whole line set: simpler and safer than diffing rows.
         await _db.QuotationItems.Where(i => i.QuotationId == id).ExecuteDeleteAsync(ct);
@@ -321,6 +324,12 @@ public class QuotationService : IQuotationService
             LineTax = i.LineTax,
             LineTotal = i.LineTotal
         }).ToList(),
+        HasPublicLink = q.PublicTokenHash is not null,
+        PublicLinkCreatedAt = q.PublicLinkCreatedAt,
+        RespondedAt = q.RespondedAt,
+        RespondedByName = q.RespondedByName,
+        RespondedByEmail = q.RespondedByEmail,
+        ResponseComment = q.ResponseComment,
         CreatedAt = q.CreatedAt,
         UpdatedAt = q.UpdatedAt
     };
