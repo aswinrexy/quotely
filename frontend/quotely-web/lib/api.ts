@@ -40,6 +40,11 @@ async function toError(response: Response): Promise<ApiError> {
   return new ApiError(message, response.status);
 }
 
+/** A 401 from /api/auth/* is a bad credential, not a dropped session. */
+function isAuthEndpoint(path: string) {
+  return path.startsWith("/api/auth/");
+}
+
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   const token = tokenStore.get();
   const headers = new Headers(init.headers);
@@ -53,7 +58,7 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
     throw new ApiError("Cannot reach the server. Is the API running?", 0);
   }
 
-  if (response.status === 401) {
+  if (response.status === 401 && !isAuthEndpoint(path)) {
     onUnauthorized();
     throw new ApiError("Your session has expired. Please sign in again.", 401);
   }
