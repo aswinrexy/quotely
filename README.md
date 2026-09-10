@@ -5,6 +5,8 @@ quotation, and download a professional PDF you can send to a customer.
 
 ```
 Sign up → Business profile → Customer → Products/Services → Quotation → Totals → PDF → Download
+                                                                  ↓
+                                      Share link → Customer accepts → Invoice → Invoice PDF
 ```
 
 ## Tech stack
@@ -197,6 +199,25 @@ accepted or rejected.
 
 See [docs/api.md](docs/api.md) for the endpoints and [docs/architecture.md](docs/architecture.md)
 for the security model.
+
+## Invoicing
+
+Once a customer has accepted a quotation, its details page offers **Convert to Invoice**. That
+raises a numbered invoice (`INV-000001`, sequential per business), which then lives under
+**Invoices** with its own list, detail page, edit screen and PDF.
+
+The invoice is a separate document, not a flag on the quotation. It stores its own copy of the line
+items, the billing details and the currency, so a later change to a product's price or a customer's
+address cannot restate an invoice that has already been issued. A quotation converts once — a
+second attempt reports the existing invoice — and an invoiced quotation cannot be deleted until its
+invoice is.
+
+Invoice status (`Draft`, `Sent`, `Partially paid`, `Paid`, `Overdue`, `Cancelled`) is separate from
+quotation status. Line items can only be changed while the invoice is a draft; a `Paid` or
+`Cancelled` invoice can no longer be edited, and a `Paid` or partly paid one cannot be deleted. The
+due date defaults to 15 days after the invoice date and is editable while the invoice is a draft.
+
+Payments are not part of this version.
 
 ## Documentation
 

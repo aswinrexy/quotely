@@ -64,6 +64,13 @@ public record QuotationDto
     public string? RespondedByEmail { get; init; }
     public string? ResponseComment { get; init; }
 
+    // ---- invoicing (V2.2) ----
+    /// <summary>Set once this quotation has been converted. A quotation carries at most one invoice.</summary>
+    public Guid? InvoiceId { get; init; }
+    public string? InvoiceNumber { get; init; }
+    /// <summary>True when the quotation is Accepted and not yet invoiced.</summary>
+    public bool CanConvertToInvoice { get; init; }
+
     public DateTime CreatedAt { get; init; }
     public DateTime UpdatedAt { get; init; }
 }

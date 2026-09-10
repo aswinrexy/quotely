@@ -76,28 +76,33 @@ export const api = {
     request<T>(path, { method: "PUT", body: JSON.stringify(body) }),
   delete: <T>(path: string) => request<T>(path, { method: "DELETE" }),
 
-  /** Downloads a generated PDF, honouring the filename the API sends back. */
-  async downloadPdf(quotationId: string): Promise<{ blob: Blob; fileName: string }> {
-    const token = tokenStore.get();
-    const response = await fetch(`${API_BASE_URL}/api/quotations/${quotationId}/pdf`, {
-      method: "POST",
-      headers: token ? { Authorization: `Bearer ${token}` } : undefined,
-    });
+  /** Downloads a generated quotation PDF, honouring the filename the API sends back. */
+  downloadPdf: (quotationId: string) => downloadPdfFrom(`/api/quotations/${quotationId}/pdf`),
 
-    if (response.status === 401) {
-      onUnauthorized();
-      throw new ApiError("Your session has expired. Please sign in again.", 401);
-    }
-    if (!response.ok) throw await toError(response);
-
-    const disposition = response.headers.get("Content-Disposition") ?? "";
-    const match = /filename\*?=(?:UTF-8'')?"?([^";]+)"?/i.exec(disposition);
-    return {
-      blob: await response.blob(),
-      fileName: match ? decodeURIComponent(match[1]) : "quotation.pdf",
-    };
-  },
+  /** Downloads a generated invoice PDF. */
+  downloadInvoicePdf: (invoiceId: string) => downloadPdfFrom(`/api/invoices/${invoiceId}/pdf`),
 };
+
+async function downloadPdfFrom(path: string): Promise<{ blob: Blob; fileName: string }> {
+  const token = tokenStore.get();
+  const response = await fetch(`${API_BASE_URL}${path}`, {
+    method: "POST",
+    headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+  });
+
+  if (response.status === 401) {
+    onUnauthorized();
+    throw new ApiError("Your session has expired. Please sign in again.", 401);
+  }
+  if (!response.ok) throw await toError(response);
+
+  const disposition = response.headers.get("Content-Disposition") ?? "";
+  const match = /filename\*?=(?:UTF-8'')?"?([^";]+)"?/i.exec(disposition);
+  return {
+    blob: await response.blob(),
+    fileName: match ? decodeURIComponent(match[1]) : "document.pdf",
+  };
+}
 
 /**
  * Customer-facing calls. The share token in the URL is the only credential, so these requests

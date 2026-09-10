@@ -1,0 +1,76 @@
+namespace Quotely.Api.Models;
+
+/// <summary>
+/// A financial document raised from an accepted quotation. Everything it prints is a snapshot
+/// taken at conversion time, so later edits to the catalogue or the customer record cannot
+/// rewrite an issued invoice.
+/// </summary>
+public class Invoice
+{
+    public Guid Id { get; set; }
+    public Guid UserId { get; set; }
+    public AppUser? User { get; set; }
+
+    /// <summary>The accepted quotation this invoice was raised from. One invoice per quotation.</summary>
+    public Guid QuotationId { get; set; }
+    public Quotation? Quotation { get; set; }
+
+    /// <summary>Kept for navigation and filtering only — never as the source of printed details.</summary>
+    public Guid CustomerId { get; set; }
+    public Customer? Customer { get; set; }
+
+    /// <summary>Human-readable number, unique per user. Example: INV-000001.</summary>
+    public string InvoiceNumber { get; set; } = string.Empty;
+    /// <summary>Numeric part of the invoice number, used to allocate the next value.</summary>
+    public int Sequence { get; set; }
+
+    public DateOnly InvoiceDate { get; set; }
+    public DateOnly DueDate { get; set; }
+
+    public InvoiceStatus Status { get; set; } = InvoiceStatus.Draft;
+
+    // ---- customer snapshot ---------------------------------------------
+    // The quotation reads the live Customer row, which is fine for an offer. An invoice must stay
+    // historically true, so the billing details are copied in at conversion time.
+    public string CustomerName { get; set; } = string.Empty;
+    public string? CustomerCompanyName { get; set; }
+    public string? CustomerEmail { get; set; }
+    public string? CustomerPhone { get; set; }
+    public string? CustomerAddressLine { get; set; }
+    public string? CustomerCity { get; set; }
+    public string? CustomerState { get; set; }
+    public string? CustomerPostalCode { get; set; }
+    public string? CustomerCountry { get; set; }
+
+    // ---- money -----------------------------------------------------------
+    // Server-computed from the snapshotted items. Never trusted from the client.
+    public decimal Subtotal { get; set; }
+    public decimal DiscountTotal { get; set; }
+    public decimal TaxTotal { get; set; }
+    public decimal GrandTotal { get; set; }
+    /// <summary>Currency the invoice was raised in, so changing the profile later cannot restate it.</summary>
+    public string Currency { get; set; } = "INR";
+
+    public string? Notes { get; set; }
+    public string? Terms { get; set; }
+
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
+
+    public ICollection<InvoiceItem> Items { get; set; } = new List<InvoiceItem>();
+
+    /// <summary>
+    /// Money is settled or written off: nothing about this invoice may change any more.
+    /// V2.3 will extend this to any invoice carrying payments.
+    /// </summary>
+    public bool IsLocked => Status is InvoiceStatus.Paid or InvoiceStatus.Cancelled;
+
+    /// <summary>
+    /// Line items and totals may only be rewritten while the invoice is still a draft. Once it has
+    /// gone out, the figures the customer received are history.
+    /// </summary>
+    public bool AllowsFinancialEdits => Status == InvoiceStatus.Draft;
+
+    /// <summary>Display hint only — the stored status stays authoritative.</summary>
+    public bool IsOverdue(DateOnly today) => !IsLocked && DueDate < today;
+}

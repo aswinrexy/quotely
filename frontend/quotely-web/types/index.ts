@@ -104,6 +104,9 @@ export interface Quotation {
   grandTotal: number;
   currency: string;
   items: QuotationItem[];
+  invoiceId?: string | null;
+  invoiceNumber?: string | null;
+  canConvertToInvoice: boolean;
   hasPublicLink: boolean;
   publicLinkCreatedAt?: string | null;
   respondedAt?: string | null;
@@ -221,4 +224,118 @@ export interface PublicResponseRequest {
   name: string;
   email?: string | null;
   comment?: string | null;
+}
+
+// ---- V2.2 invoicing ---------------------------------------------------
+
+export type InvoiceStatus =
+  | "Draft"
+  | "Sent"
+  | "PartiallyPaid"
+  | "Paid"
+  | "Overdue"
+  | "Cancelled";
+
+export const INVOICE_STATUSES: InvoiceStatus[] = [
+  "Draft",
+  "Sent",
+  "PartiallyPaid",
+  "Paid",
+  "Overdue",
+  "Cancelled",
+];
+
+export const INVOICE_STATUS_LABELS: Record<InvoiceStatus, string> = {
+  Draft: "Draft",
+  Sent: "Sent",
+  PartiallyPaid: "Partially paid",
+  Paid: "Paid",
+  Overdue: "Overdue",
+  Cancelled: "Cancelled",
+};
+
+export interface InvoiceItem {
+  id: string;
+  name: string;
+  description?: string | null;
+  unit: string;
+  quantity: number;
+  unitPrice: number;
+  discount: number;
+  taxRate: number;
+  lineSubtotal: number;
+  lineTax: number;
+  lineTotal: number;
+}
+
+/** The billing details frozen onto the invoice — not the live customer record. */
+export interface InvoiceCustomer {
+  name: string;
+  companyName?: string | null;
+  email?: string | null;
+  phone?: string | null;
+  addressLine?: string | null;
+  city?: string | null;
+  state?: string | null;
+  postalCode?: string | null;
+  country?: string | null;
+}
+
+export interface InvoiceListItem {
+  id: string;
+  invoiceNumber: string;
+  customerName: string;
+  invoiceDate: string;
+  dueDate: string;
+  status: InvoiceStatus;
+  grandTotal: number;
+  currency: string;
+  isOverdue: boolean;
+  quotationNumber: string;
+}
+
+export interface Invoice {
+  id: string;
+  invoiceNumber: string;
+  quotationId: string;
+  quotationNumber: string;
+  customer: InvoiceCustomer;
+  business?: BusinessProfile | null;
+  invoiceDate: string;
+  dueDate: string;
+  status: InvoiceStatus;
+  isOverdue: boolean;
+  canEdit: boolean;
+  canEditItems: boolean;
+  canDelete: boolean;
+  notes?: string | null;
+  terms?: string | null;
+  subtotal: number;
+  discountTotal: number;
+  taxTotal: number;
+  grandTotal: number;
+  currency: string;
+  items: InvoiceItem[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface SaveInvoiceItemRequest {
+  name: string;
+  description?: string | null;
+  unit: string;
+  quantity: number;
+  unitPrice: number;
+  discount: number;
+  taxRate: number;
+}
+
+export interface SaveInvoiceRequest {
+  invoiceDate: string;
+  dueDate: string;
+  status?: InvoiceStatus;
+  notes?: string | null;
+  terms?: string | null;
+  /** Only accepted while the invoice is a draft; omitted otherwise. */
+  items?: SaveInvoiceItemRequest[];
 }

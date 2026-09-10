@@ -9,18 +9,16 @@ import { useToast } from "@/components/ui/toast";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { ConfirmDialog } from "@/components/ui/dialog";
-import { StatusBadge } from "@/components/ui/badge";
+import { InvoiceStatusBadge } from "@/components/ui/badge";
 import { ErrorState, LoadingState } from "@/components/ui/states";
 import { PageHeader } from "@/components/app/page-header";
-import { ShareLinkCard } from "@/components/app/share-link-card";
-import { InvoiceCard } from "@/components/app/invoice-card";
-import type { Quotation } from "@/types";
+import { INVOICE_STATUS_LABELS, type Invoice } from "@/types";
 
-export default function QuotationDetailPage() {
+export default function InvoiceDetailPage() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
   const toast = useToast();
-  const [quotation, setQuotation] = useState<Quotation | null>(null);
+  const [invoice, setInvoice] = useState<Invoice | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [downloading, setDownloading] = useState(false);
@@ -31,24 +29,11 @@ export default function QuotationDetailPage() {
     setLoading(true);
     setError(null);
     try {
-      setQuotation(await api.get<Quotation>(`/api/quotations/${id}`));
+      setInvoice(await api.get<Invoice>(`/api/invoices/${id}`));
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not load the quotation.");
+      setError(err instanceof Error ? err.message : "Could not load the invoice.");
     } finally {
       setLoading(false);
-    }
-  }, [id]);
-
-  /**
-   * Refreshes the quotation in place, without the loading state. The share panel keeps the
-   * generated URL in its own state, and that URL can never be fetched again — so a refresh that
-   * unmounted the panel would throw the link away before the owner could copy it.
-   */
-  const refresh = useCallback(async () => {
-    try {
-      setQuotation(await api.get<Quotation>(`/api/quotations/${id}`));
-    } catch {
-      // A failed background refresh leaves the page on the data it already has.
     }
   }, [id]);
 
@@ -59,7 +44,7 @@ export default function QuotationDetailPage() {
   async function download() {
     setDownloading(true);
     try {
-      const { blob, fileName } = await api.downloadPdf(id);
+      const { blob, fileName } = await api.downloadInvoicePdf(id);
       saveBlob(blob, fileName);
       toast("PDF downloaded.", "success");
     } catch (err) {
@@ -72,11 +57,11 @@ export default function QuotationDetailPage() {
   async function remove() {
     setDeleting(true);
     try {
-      await api.delete(`/api/quotations/${id}`);
-      toast("Quotation deleted.", "success");
-      router.push("/quotations");
+      await api.delete(`/api/invoices/${id}`);
+      toast("Invoice deleted.", "success");
+      router.push("/invoices");
     } catch (err) {
-      toast(err instanceof Error ? err.message : "Could not delete the quotation.", "error");
+      toast(err instanceof Error ? err.message : "Could not delete the invoice.", "error");
       setDeleting(false);
     }
   }
@@ -89,17 +74,17 @@ export default function QuotationDetailPage() {
     );
   }
 
-  if (error || !quotation) {
+  if (error || !invoice) {
     return (
       <Card>
-        <ErrorState message={error ?? "Quotation not found."} onRetry={load} />
+        <ErrorState message={error ?? "Invoice not found."} onRetry={load} />
       </Card>
     );
   }
 
-  const business = quotation.business;
-  const customer = quotation.customer;
-  const currency = quotation.currency;
+  const business = invoice.business;
+  const customer = invoice.customer;
+  const currency = invoice.currency;
 
   const businessAddress = [
     business?.addressLine,
@@ -116,30 +101,58 @@ export default function QuotationDetailPage() {
   return (
     <>
       <PageHeader
-        title={quotation.quotationNumber}
+        title={invoice.invoiceNumber}
         description={`For ${customer.name}`}
         action={
           <>
-            <Link href="/quotations">
+            <Link href="/invoices">
               <Button variant="secondary">Back</Button>
             </Link>
-            <Link href={`/quotations/${quotation.id}/edit`}>
-              <Button variant="secondary">Edit</Button>
-            </Link>
-            <Button variant="secondary" onClick={() => setConfirmDelete(true)}>
-              Delete
-            </Button>
+            {invoice.canEdit && (
+              <Link href={`/invoices/${invoice.id}/edit`}>
+                <Button variant="secondary">Edit</Button>
+              </Link>
+            )}
+            {invoice.canDelete && (
+              <Button variant="secondary" onClick={() => setConfirmDelete(true)}>
+                Delete
+              </Button>
+            )}
             <Button onClick={download} loading={downloading}>
-              Generate &amp; Download PDF
+              Download PDF
             </Button>
           </>
         }
       />
 
-      <div className="mb-6 space-y-6">
-        <InvoiceCard quotation={quotation} onChanged={refresh} />
-        <ShareLinkCard quotation={quotation} onChanged={refresh} />
-      </div>
+      <Card className="mb-6">
+        <div className="flex flex-wrap items-center justify-between gap-3 px-5 py-4">
+          <div className="flex flex-wrap items-center gap-3">
+            <InvoiceStatusBadge status={invoice.status} />
+            {invoice.isOverdue && (
+              <span className="text-sm font-medium text-red-600">
+                Past due since {formatDate(invoice.dueDate)}
+              </span>
+            )}
+            {!invoice.canEditItems && invoice.canEdit && (
+              <span className="text-sm text-slate-500">
+                Issued — the line items are locked, but dates, status and notes can still change.
+              </span>
+            )}
+            {!invoice.canEdit && (
+              <span className="text-sm text-slate-500">
+                {INVOICE_STATUS_LABELS[invoice.status]} invoices can no longer be changed.
+              </span>
+            )}
+          </div>
+          <Link
+            href={`/quotations/${invoice.quotationId}`}
+            className="text-sm font-medium text-blue-600 hover:underline"
+          >
+            From quotation {invoice.quotationNumber}
+          </Link>
+        </div>
+      </Card>
 
       {/* Browser preview that mirrors the generated PDF. */}
       <Card className="overflow-hidden">
@@ -162,13 +175,11 @@ export default function QuotationDetailPage() {
             </div>
 
             <div className="text-right">
-              <p className="text-2xl font-bold tracking-wide text-blue-600">QUOTATION</p>
-              <p className="mt-1 font-semibold text-slate-900">{quotation.quotationNumber}</p>
-              <p className="mt-3 text-sm text-slate-500">Date: {formatDate(quotation.quotationDate)}</p>
-              <p className="text-sm text-slate-500">Valid until: {formatDate(quotation.validUntil)}</p>
-              <div className="mt-2 flex justify-end">
-                <StatusBadge status={quotation.status} />
-              </div>
+              <p className="text-2xl font-bold tracking-wide text-teal-700">INVOICE</p>
+              <p className="mt-1 font-semibold text-slate-900">{invoice.invoiceNumber}</p>
+              <p className="mt-3 text-sm text-slate-500">Invoice date: {formatDate(invoice.invoiceDate)}</p>
+              <p className="text-sm text-slate-500">Due date: {formatDate(invoice.dueDate)}</p>
+              <p className="text-sm text-slate-500">Quotation: {invoice.quotationNumber}</p>
             </div>
           </div>
 
@@ -188,34 +199,37 @@ export default function QuotationDetailPage() {
                 {[customer.phone, customer.email].filter(Boolean).join("  •  ")}
               </p>
             )}
+            <p className="mt-2 text-xs text-slate-400">
+              Billing details as they stood when this invoice was raised.
+            </p>
           </div>
 
           <div className="mt-6 overflow-x-auto">
             <table className="w-full min-w-[560px] border-collapse text-sm">
               <thead>
-                <tr className="bg-blue-50/70">
-                  <th className="px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-blue-700">
+                <tr className="bg-teal-50">
+                  <th className="px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-teal-700">
                     Description
                   </th>
-                  <th className="px-3 py-2 text-right text-xs font-semibold uppercase tracking-wide text-blue-700">
+                  <th className="px-3 py-2 text-right text-xs font-semibold uppercase tracking-wide text-teal-700">
                     Qty
                   </th>
-                  <th className="px-3 py-2 text-right text-xs font-semibold uppercase tracking-wide text-blue-700">
+                  <th className="px-3 py-2 text-right text-xs font-semibold uppercase tracking-wide text-teal-700">
                     Unit price
                   </th>
-                  <th className="px-3 py-2 text-right text-xs font-semibold uppercase tracking-wide text-blue-700">
+                  <th className="px-3 py-2 text-right text-xs font-semibold uppercase tracking-wide text-teal-700">
                     Discount
                   </th>
-                  <th className="px-3 py-2 text-right text-xs font-semibold uppercase tracking-wide text-blue-700">
+                  <th className="px-3 py-2 text-right text-xs font-semibold uppercase tracking-wide text-teal-700">
                     Tax
                   </th>
-                  <th className="px-3 py-2 text-right text-xs font-semibold uppercase tracking-wide text-blue-700">
+                  <th className="px-3 py-2 text-right text-xs font-semibold uppercase tracking-wide text-teal-700">
                     Total
                   </th>
                 </tr>
               </thead>
               <tbody>
-                {quotation.items.map((item) => (
+                {invoice.items.map((item) => (
                   <tr key={item.id} className="border-b border-slate-100 align-top">
                     <td className="px-3 py-3">
                       <p className="font-medium text-slate-900">{item.name}</p>
@@ -244,41 +258,41 @@ export default function QuotationDetailPage() {
             <dl className="w-full max-w-xs space-y-2 text-sm">
               <div className="flex justify-between">
                 <dt className="text-slate-500">Subtotal</dt>
-                <dd className="text-slate-900">{formatMoney(quotation.subtotal, currency)}</dd>
+                <dd className="text-slate-900">{formatMoney(invoice.subtotal, currency)}</dd>
               </div>
-              {quotation.discountTotal > 0 && (
+              {invoice.discountTotal > 0 && (
                 <div className="flex justify-between">
                   <dt className="text-slate-500">Discount</dt>
-                  <dd className="text-slate-900">-{formatMoney(quotation.discountTotal, currency)}</dd>
+                  <dd className="text-slate-900">-{formatMoney(invoice.discountTotal, currency)}</dd>
                 </div>
               )}
               <div className="flex justify-between">
                 <dt className="text-slate-500">Tax</dt>
-                <dd className="text-slate-900">{formatMoney(quotation.taxTotal, currency)}</dd>
+                <dd className="text-slate-900">{formatMoney(invoice.taxTotal, currency)}</dd>
               </div>
-              <div className="mt-2 flex items-center justify-between rounded-lg bg-blue-50 px-3 py-3">
-                <dt className="text-sm font-semibold text-blue-700">TOTAL</dt>
-                <dd className="text-lg font-bold text-blue-700">
-                  {formatMoney(quotation.grandTotal, currency)}
+              <div className="mt-2 flex items-center justify-between rounded-lg bg-teal-50 px-3 py-3">
+                <dt className="text-sm font-semibold text-teal-700">TOTAL DUE</dt>
+                <dd className="text-lg font-bold text-teal-700">
+                  {formatMoney(invoice.grandTotal, currency)}
                 </dd>
               </div>
             </dl>
           </div>
 
-          {(quotation.notes || quotation.terms) && (
+          {(invoice.notes || invoice.terms) && (
             <div className="mt-8 space-y-5">
-              {quotation.notes && (
+              {invoice.notes && (
                 <div>
                   <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Notes</p>
-                  <p className="mt-1 whitespace-pre-line text-sm text-slate-700">{quotation.notes}</p>
+                  <p className="mt-1 whitespace-pre-line text-sm text-slate-700">{invoice.notes}</p>
                 </div>
               )}
-              {quotation.terms && (
+              {invoice.terms && (
                 <div>
                   <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
                     Terms &amp; conditions
                   </p>
-                  <p className="mt-1 whitespace-pre-line text-sm text-slate-700">{quotation.terms}</p>
+                  <p className="mt-1 whitespace-pre-line text-sm text-slate-700">{invoice.terms}</p>
                 </div>
               )}
             </div>
@@ -288,8 +302,8 @@ export default function QuotationDetailPage() {
 
       <ConfirmDialog
         open={confirmDelete}
-        title="Delete quotation"
-        description={`Delete ${quotation.quotationNumber}? This cannot be undone.`}
+        title="Delete invoice"
+        description={`Delete ${invoice.invoiceNumber}? This cannot be undone. The quotation ${invoice.quotationNumber} can then be invoiced again.`}
         loading={deleting}
         onConfirm={remove}
         onCancel={() => setConfirmDelete(false)}

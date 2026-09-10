@@ -10,6 +10,7 @@ import { cn } from "@/lib/cn";
 const NAV = [
   { href: "/dashboard", label: "Dashboard" },
   { href: "/quotations", label: "Quotations" },
+  { href: "/invoices", label: "Invoices" },
   { href: "/customers", label: "Customers" },
   { href: "/products", label: "Products & Services" },
   { href: "/business-profile", label: "Business Profile" },

@@ -14,6 +14,7 @@ public class QuotationsController : ControllerBase
 {
     private readonly IQuotationService _quotations;
     private readonly IPublicQuotationService _publicQuotations;
+    private readonly IInvoiceService _invoices;
     private readonly IPdfService _pdf;
     private readonly AppDbContext _db;
     private readonly ICurrentUser _currentUser;
@@ -21,12 +22,14 @@ public class QuotationsController : ControllerBase
     public QuotationsController(
         IQuotationService quotations,
         IPublicQuotationService publicQuotations,
+        IInvoiceService invoices,
         IPdfService pdf,
         AppDbContext db,
         ICurrentUser currentUser)
     {
         _quotations = quotations;
         _publicQuotations = publicQuotations;
+        _invoices = invoices;
         _pdf = pdf;
         _db = db;
         _currentUser = currentUser;
@@ -73,6 +76,19 @@ public class QuotationsController : ControllerBase
     [ProducesResponseType(typeof(PublicQuotationLinkDto), StatusCodes.Status200OK)]
     public async Task<ActionResult<PublicQuotationLinkDto>> CreatePublicLink(Guid id, CancellationToken ct)
         => Ok(await _publicQuotations.CreateLinkAsync(_currentUser.Id, id, ct));
+
+    /// <summary>
+    /// Raises the invoice for an accepted quotation. Only Accepted quotations convert, and only
+    /// once: a second call reports the existing invoice as a conflict rather than duplicating it.
+    /// </summary>
+    [HttpPost("{id:guid}/convert-to-invoice")]
+    [ProducesResponseType(typeof(InvoiceDto), StatusCodes.Status201Created)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
+    public async Task<ActionResult<InvoiceDto>> ConvertToInvoice(Guid id, CancellationToken ct)
+    {
+        var invoice = await _invoices.ConvertFromQuotationAsync(_currentUser.Id, id, ct);
+        return Created($"/api/invoices/{invoice.Id}", invoice);
+    }
 
     /// <summary>Generates the PDF on the fly. Nothing is stored server-side.</summary>
     [HttpPost("{id:guid}/pdf")]

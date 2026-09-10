@@ -47,6 +47,9 @@ public class Quotation
 
     public ICollection<QuotationItem> Items { get; set; } = new List<QuotationItem>();
 
+    /// <summary>The invoice raised from this quotation, if any. The foreign key lives on Invoices.</summary>
+    public Invoice? Invoice { get; set; }
+
     /// <summary>A quotation past its valid-until date is closed to customer responses.</summary>
     public bool IsExpired(DateOnly today) => ValidUntil < today;
 

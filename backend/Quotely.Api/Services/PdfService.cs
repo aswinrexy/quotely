@@ -11,11 +11,18 @@ public record GeneratedPdf(byte[] Content, string FileName);
 public interface IPdfService
 {
     GeneratedPdf Generate(Quotation quotation, BusinessProfile? business);
+    GeneratedPdf GenerateInvoice(Invoice invoice, BusinessProfile? business);
 }
 
 public class PdfService : IPdfService
 {
     private readonly ILogger<PdfService> _logger;
+
+    /// <summary>
+    /// QuestPDF refuses to render until a license is declared. Program.cs sets it at startup, but
+    /// declaring it here too keeps the service usable on its own — in unit tests, for instance.
+    /// </summary>
+    static PdfService() => QuestPDF.Settings.License = QuestPDF.Infrastructure.LicenseType.Community;
 
     public PdfService(ILogger<PdfService> logger) => _logger = logger;
 
@@ -32,6 +39,31 @@ public class PdfService : IPdfService
             throw new ApiException(System.Net.HttpStatusCode.InternalServerError,
                 "The quotation PDF could not be generated. Please try again.");
         }
+    }
+
+    public GeneratedPdf GenerateInvoice(Invoice invoice, BusinessProfile? business)
+    {
+        try
+        {
+            var document = new InvoiceDocument(invoice, business, DecodeLogo(business?.LogoUrl));
+            return new GeneratedPdf(document.GeneratePdf(), BuildFileName(invoice));
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "PDF generation failed for invoice {InvoiceId}", invoice.Id);
+            throw new ApiException(System.Net.HttpStatusCode.InternalServerError,
+                "The invoice PDF could not be generated. Please try again.");
+        }
+    }
+
+    /// <summary>Example: INV-000001-John-Smith.pdf</summary>
+    public static string BuildFileName(Invoice invoice)
+    {
+        // The snapshotted name, so the file matches the document even if the customer was renamed.
+        var customer = Slug(invoice.CustomerName);
+        return string.IsNullOrEmpty(customer)
+            ? $"{invoice.InvoiceNumber}.pdf"
+            : $"{invoice.InvoiceNumber}-{customer}.pdf";
     }
 
     /// <summary>Example: QT-000001-John-Smith.pdf</summary>

@@ -140,6 +140,14 @@ public class QuotationService : IQuotationService
     public async Task DeleteAsync(Guid userId, Guid id, CancellationToken ct = default)
     {
         var quotation = await LoadAsync(userId, id, tracking: true, ct);
+
+        // An invoice is a financial record that points back at this quotation; deleting the
+        // quotation would leave it dangling, so the invoice has to go first.
+        if (quotation.Invoice is not null)
+            throw ApiException.Conflict(
+                $"{quotation.QuotationNumber} has been invoiced as {quotation.Invoice.InvoiceNumber}. " +
+                "Delete the invoice first.");
+
         _db.Quotations.Remove(quotation);
         await _db.SaveChangesAsync(ct);
     }
@@ -167,6 +175,7 @@ public class QuotationService : IQuotationService
         var query = _db.Quotations
             .Include(q => q.Customer)
             .Include(q => q.Items.OrderBy(i => i.SortOrder))
+            .Include(q => q.Invoice)
             .Where(q => q.Id == id && q.UserId == userId);
 
         if (!tracking) query = query.AsNoTracking();
@@ -324,6 +333,9 @@ public class QuotationService : IQuotationService
             LineTax = i.LineTax,
             LineTotal = i.LineTotal
         }).ToList(),
+        InvoiceId = q.Invoice?.Id,
+        InvoiceNumber = q.Invoice?.InvoiceNumber,
+        CanConvertToInvoice = q.Status == QuotationStatus.Accepted && q.Invoice is null,
         HasPublicLink = q.PublicTokenHash is not null,
         PublicLinkCreatedAt = q.PublicLinkCreatedAt,
         RespondedAt = q.RespondedAt,

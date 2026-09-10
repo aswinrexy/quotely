@@ -67,6 +67,14 @@ public class QuotelyApiFactory : WebApplicationFactory<Program>, IAsyncLifetime
         return select(quotation);
     }
 
+    /// <summary>Counts the invoices raised against one quotation, straight from the database.</summary>
+    public async Task<int> CountInvoicesAsync(Guid quotationId)
+    {
+        using var scope = Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        return await db.Invoices.AsNoTracking().CountAsync(i => i.QuotationId == quotationId);
+    }
+
     /// <summary>Registers a fresh account and returns a client already carrying its bearer token.</summary>
     public async Task<HttpClient> CreateSignedInClientAsync(string? email = null)
     {

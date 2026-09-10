@@ -21,4 +21,5 @@ public class Customer
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
 
     public ICollection<Quotation> Quotations { get; set; } = new List<Quotation>();
+    public ICollection<Invoice> Invoices { get; set; } = new List<Invoice>();
 }

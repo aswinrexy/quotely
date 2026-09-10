@@ -46,10 +46,14 @@ AppUser (Identity)
  ├── BusinessProfile   (1:1)
  ├── Customer          (1:N)
  ├── Product           (1:N)
- └── Quotation         (1:N)
-        ├── Customer       (N:1, restrict delete)
-        └── QuotationItem  (1:N, cascade delete)
-               └── Product (N:1, optional, set null on delete)
+ ├── Quotation         (1:N)
+ │      ├── Customer       (N:1, restrict delete)
+ │      ├── QuotationItem  (1:N, cascade delete)
+ │      │      └── Product (N:1, optional, set null on delete)
+ │      └── Invoice        (1:1, optional, restrict delete)
+ └── Invoice           (1:N)
+        ├── Customer       (N:1, restrict delete — navigation only)
+        └── InvoiceItem    (1:N, cascade delete)
 ```
 
 `Quotations` additionally carries the V2.1 share-link columns — `PublicTokenHash` (unique),
@@ -72,6 +76,11 @@ Indexes:
 | Quotations | `(UserId, Status)` | dashboard counts and status filter |
 | Quotations | `PublicTokenHash` unique, filtered | share-link lookup; many rows have no link |
 | QuotationItems | `QuotationId` | item loading |
+| Invoices | `(UserId, InvoiceNumber)` unique | numbers unique per business |
+| Invoices | `(UserId, Sequence)` unique | allocation of the next number |
+| Invoices | `(UserId, Status)` | status filter |
+| Invoices | `QuotationId` unique | one invoice per quotation, enforced by the database |
+| InvoiceItems | `InvoiceId` | item loading |
 
 Money uses `decimal(18,2)`, quantities `decimal(18,3)` and tax rates `decimal(5,2)`. No monetary
 value is ever a `float` or `double`, in the database or in C#.
@@ -202,11 +211,56 @@ before any path reaches the log, so log readers never obtain working links.
 Not built for V2.1, and reasonable next steps: a link expiry or explicit revoke button separate
 from replacement, and rate limiting on the public endpoints.
 
+## Invoicing (V2.2)
+
+An accepted quotation converts into an invoice — a separate financial document with its own table,
+its own numbering (`INV-000001`, sequential per user) and its own status enum (`Draft`, `Sent`,
+`PartiallyPaid`, `Paid`, `Overdue`, `Cancelled`). Quotation status is untouched by any of it.
+
+```
+Quotation (Accepted)
+      │  POST /api/quotations/{id}/convert-to-invoice
+      ▼
+Invoice  ──►  InvoiceItems      (snapshot of the quotation lines)
+      │       customer snapshot (name, company, address, contact)
+      │       currency snapshot
+      ▼
+GET /api/invoices/{id}/pdf      (rendered from the snapshot alone)
+```
+
+**Why a snapshot, and how it is enforced.** An invoice has to stay true to what was agreed. The
+quotation already snapshots its own lines, but it renders the customer block from the live
+`Customer` row and the currency from the live `BusinessProfile` — fine for an offer, wrong for a
+financial record. So `Invoice` stores the billing details and the currency, and `InvoiceItem` has
+deliberately **no** `ProductId`: there is no path by which a line could resolve its price through
+today's catalogue. Only the letterhead is read live, because that is the issuer's own identity.
+
+**Totals.** `InvoiceCalculator` applies the same rules as `QuotationCalculator` to invoice
+entities. Conversion therefore recomputes the totals from the copied lines rather than trusting a
+copied number, and then asserts the result equals the accepted quotation's grand total — a mismatch
+aborts the conversion instead of silently issuing a wrong invoice. `InvoiceCalculatorTests` pins the
+two calculators to each other so a future divergence fails a test rather than an invoice.
+
+**One invoice per quotation.** `Invoices.QuotationId` carries a unique index, so a duplicate cannot
+be written even under a race; the service checks first and returns `409` naming the existing
+invoice. The FK back to `Quotations` is `Restrict`, so deleting an invoiced quotation is refused
+with a message pointing at the invoice.
+
+**Editing.** `Invoice.AllowsFinancialEdits` (draft only) gates the line items and totals;
+`Invoice.IsLocked` (`Paid` or `Cancelled`) gates the whole update. Both are properties on the
+entity rather than checks scattered through the controller, so V2.3 can widen `IsLocked` to "has
+payments" in one place. `Paid` and `PartiallyPaid` invoices also refuse deletion — cancel instead.
+
+**Overdue** is derived from `DueDate` for display (`isOverdue`) and is also a status the owner can
+set. Nothing runs in the background and no second expiry mechanism exists.
+
+Not built for V2.2, by instruction: payments, part-payments and receipts — V2.3.
+
 ## Extension points left open for V2
 
 - `BusinessProfile.LogoUrl` is a plain string holding a data URI; switching to blob storage only
   changes the upload step and that field's value.
 - `PdfFonts` registers any TTF dropped into `Pdf/Fonts`, so the PDF typeface can be branded
   without touching the layout code.
-- Quotation items are already snapshots, which is what invoicing would need to convert a quotation
-  into an invoice later.
+- Quotation items are already snapshots, which is what invoicing needed to convert a quotation
+  into an invoice (delivered in V2.2).

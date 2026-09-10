@@ -266,6 +266,97 @@ The owner's quotation DTO carries `hasPublicLink` and `publicLinkCreatedAt` so t
 a link is active, plus `respondedAt`, `respondedByName`, `respondedByEmail` and `responseComment`
 once the customer has answered.
 
+### `POST /api/quotations/{id}/convert-to-invoice`
+
+Raises the invoice for an accepted quotation. Returns `201 Created` with the full invoice DTO and a
+`Location` of `/api/invoices/{id}`.
+
+The server checks, in order: the quotation exists and belongs to the caller (`404` otherwise), its
+status is `Accepted` (`409` otherwise), it has at least one item (`400` otherwise), and no invoice
+exists for it yet (`409`, naming the existing invoice). Items and billing details are copied onto
+the invoice; the totals are recomputed from those copies and asserted to equal the accepted
+quotation's. Number allocation and the insert share one transaction.
+
+The quotation DTO carries `invoiceId`, `invoiceNumber` and `canConvertToInvoice` so the UI knows
+which of the three states to show.
+
+## Invoices
+
+All endpoints require `Authorization: Bearer <token>` and are scoped to the caller. Another user's
+invoice returns `404`.
+
+| Method | Path | Purpose |
+| ------ | ---- | ------- |
+| `GET` | `/api/invoices` | paged list; `search`, `status`, `page`, `pageSize` |
+| `GET` | `/api/invoices/{id}` | one invoice with items |
+| `PUT` | `/api/invoices/{id}` | update dates, status, notes, terms and (draft only) items |
+| `DELETE` | `/api/invoices/{id}` | delete, unless `Paid` or `PartiallyPaid` |
+| `GET`/`POST` | `/api/invoices/{id}/pdf` | render the invoice PDF |
+
+`search` matches the invoice number, the snapshotted customer name or company, and the source
+quotation number. `status` is one of `Draft`, `Sent`, `PartiallyPaid`, `Paid`, `Overdue`,
+`Cancelled`.
+
+### Update payload
+
+```json
+{
+  "invoiceDate": "2026-09-11",
+  "dueDate": "2026-09-26",
+  "status": "Sent",
+  "notes": "…",
+  "terms": "…",
+  "items": [
+    { "name": "AC Installation", "description": "…", "unit": "Service",
+      "quantity": 2, "unitPrice": 5000, "discount": 0, "taxRate": 18 }
+  ]
+}
+```
+
+`items` is optional and only accepted while the invoice is `Draft`; sending it against an issued
+invoice returns `409`. The invoice number, totals and ownership are never taken from the request:
+the number is immutable and the totals are recomputed from the submitted lines. `dueDate` before
+`invoiceDate` returns `400`. A `Paid` or `Cancelled` invoice rejects the whole update with `409`.
+
+### Invoice response
+
+```json
+{
+  "id": "…",
+  "invoiceNumber": "INV-000001",
+  "quotationId": "…",
+  "quotationNumber": "QT-000001",
+  "customer": { "name": "John Smith", "companyName": "…", "city": "Chennai", "…": "…" },
+  "business": { "businessName": "ABC Electricals", "…": "…" },
+  "invoiceDate": "2026-09-11",
+  "dueDate": "2026-09-26",
+  "status": "Draft",
+  "isOverdue": false,
+  "canEdit": true,
+  "canEditItems": true,
+  "canDelete": true,
+  "subtotal": 12000.00,
+  "discountTotal": 0.00,
+  "taxTotal": 2160.00,
+  "grandTotal": 14160.00,
+  "currency": "INR",
+  "items": [ { "id": "…", "name": "AC Installation", "lineTotal": 11800.00, "…": "…" } ]
+}
+```
+
+`customer` is the snapshot stored on the invoice, not the live `Customer` record — editing the
+customer afterwards does not change it. `isOverdue` is a display hint computed from `dueDate`; the
+stored `status` stays authoritative.
+
+### `GET /api/invoices/{id}/pdf`
+
+Renders the invoice from its own snapshot. Responds with:
+
+```
+Content-Type: application/pdf
+Content-Disposition: attachment; filename=INV-000001-John-Smith.pdf
+```
+
 ## Public quotation API (no authentication)
 
 These endpoints are anonymous by design. The share token in the path **is** the authorization: it

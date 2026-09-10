@@ -15,6 +15,8 @@ public class AppDbContext : IdentityDbContext<AppUser, IdentityRole<Guid>, Guid>
     public DbSet<Product> Products => Set<Product>();
     public DbSet<Quotation> Quotations => Set<Quotation>();
     public DbSet<QuotationItem> QuotationItems => Set<QuotationItem>();
+    public DbSet<Invoice> Invoices => Set<Invoice>();
+    public DbSet<InvoiceItem> InvoiceItems => Set<InvoiceItem>();
 
     /// <summary>
     /// Neither SQL Server's datetime2 nor SQLite stores a timezone, so values read back arrive as
@@ -113,6 +115,58 @@ public class AppDbContext : IdentityDbContext<AppUser, IdentityRole<Guid>, Guid>
             // Restrict: a customer with quotations must not silently disappear.
             e.HasOne(x => x.Customer).WithMany(c => c.Quotations)
                 .HasForeignKey(x => x.CustomerId).OnDelete(DeleteBehavior.Restrict);
+        });
+
+        b.Entity<Invoice>(e =>
+        {
+            e.HasIndex(x => new { x.UserId, x.InvoiceNumber }).IsUnique();
+            e.HasIndex(x => new { x.UserId, x.Sequence }).IsUnique();
+            e.HasIndex(x => new { x.UserId, x.Status });
+            // One invoice per quotation: enforced in the database, not only in the service, so a
+            // concurrent double conversion cannot slip two invoices through.
+            e.HasIndex(x => x.QuotationId).IsUnique();
+            e.Property(x => x.InvoiceNumber).HasMaxLength(30).IsRequired();
+            e.Property(x => x.Currency).HasMaxLength(3).IsRequired();
+            e.Property(x => x.CustomerName).HasMaxLength(200).IsRequired();
+            e.Property(x => x.CustomerCompanyName).HasMaxLength(200);
+            e.Property(x => x.CustomerEmail).HasMaxLength(256);
+            e.Property(x => x.CustomerPhone).HasMaxLength(50);
+            e.Property(x => x.CustomerAddressLine).HasMaxLength(400);
+            e.Property(x => x.CustomerCity).HasMaxLength(120);
+            e.Property(x => x.CustomerState).HasMaxLength(120);
+            e.Property(x => x.CustomerPostalCode).HasMaxLength(30);
+            e.Property(x => x.CustomerCountry).HasMaxLength(120);
+            e.Property(x => x.Notes).HasMaxLength(2000);
+            e.Property(x => x.Terms).HasMaxLength(4000);
+            e.Property(x => x.Subtotal).HasPrecision(18, 2);
+            e.Property(x => x.DiscountTotal).HasPrecision(18, 2);
+            e.Property(x => x.TaxTotal).HasPrecision(18, 2);
+            e.Property(x => x.GrandTotal).HasPrecision(18, 2);
+            e.HasOne(x => x.User).WithMany(u => u.Invoices)
+                .HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Cascade);
+            // Restrict on both sides: an invoiced quotation and an invoiced customer must not be
+            // deleted out from under a financial document.
+            e.HasOne(x => x.Quotation).WithOne(q => q.Invoice)
+                .HasForeignKey<Invoice>(x => x.QuotationId).OnDelete(DeleteBehavior.Restrict);
+            e.HasOne(x => x.Customer).WithMany(c => c.Invoices)
+                .HasForeignKey(x => x.CustomerId).OnDelete(DeleteBehavior.Restrict);
+        });
+
+        b.Entity<InvoiceItem>(e =>
+        {
+            e.HasIndex(x => x.InvoiceId);
+            e.Property(x => x.Name).HasMaxLength(200).IsRequired();
+            e.Property(x => x.Description).HasMaxLength(1000);
+            e.Property(x => x.Unit).HasMaxLength(50).IsRequired();
+            e.Property(x => x.Quantity).HasPrecision(18, 3);
+            e.Property(x => x.UnitPrice).HasPrecision(18, 2);
+            e.Property(x => x.Discount).HasPrecision(18, 2);
+            e.Property(x => x.TaxRate).HasPrecision(5, 2);
+            e.Property(x => x.LineSubtotal).HasPrecision(18, 2);
+            e.Property(x => x.LineTax).HasPrecision(18, 2);
+            e.Property(x => x.LineTotal).HasPrecision(18, 2);
+            e.HasOne(x => x.Invoice).WithMany(i => i.Items)
+                .HasForeignKey(x => x.InvoiceId).OnDelete(DeleteBehavior.Cascade);
         });
 
         b.Entity<QuotationItem>(e =>
