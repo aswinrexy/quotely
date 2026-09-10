@@ -1,0 +1,4 @@
+<Solution>
+  <Project Path="Quotely.Api/Quotely.Api.csproj" />
+  <Project Path="Quotely.Tests/Quotely.Tests.csproj" />
+</Solution>

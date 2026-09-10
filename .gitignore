@@ -1,0 +1,28 @@
+# .NET
+bin/
+obj/
+*.user
+*.db
+*.db-shm
+*.db-wal
+
+# Node / Next.js
+node_modules/
+.next/
+out/
+next-env.d.ts
+
+# Environment & secrets
+.env
+.env.local
+.env*.local
+appsettings.*.local.json
+
+# OS / editors
+.DS_Store
+.vscode/
+.idea/
+
+# Next.js agent rule files (regenerated on dev)
+AGENTS.md
+CLAUDE.md

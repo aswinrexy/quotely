@@ -1,0 +1,18 @@
+# Local SQL Server for Quotely development.
+# Azure SQL Edge is used because it has an arm64 image (Apple Silicon);
+# on x86 you can swap in mcr.microsoft.com/mssql/server:2022-latest.
+services:
+  db:
+    image: mcr.microsoft.com/azure-sql-edge:latest
+    container_name: quotely-sql
+    environment:
+      ACCEPT_EULA: "1"
+      MSSQL_SA_PASSWORD: "${MSSQL_SA_PASSWORD:-Your_strong_password123}"
+      MSSQL_PID: "Developer"
+    ports:
+      - "1433:1433"
+    volumes:
+      - quotely-sql-data:/var/opt/mssql
+
+volumes:
+  quotely-sql-data:
