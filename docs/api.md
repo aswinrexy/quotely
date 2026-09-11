@@ -388,7 +388,8 @@ Payment history and the derived financial summary.
 }
 ```
 
-`paid` is summed from captured payments; there is no stored, editable paid column. Payment
+`paid` is summed from captured payments; there is no stored, editable paid column. `overpaidBy` is
+zero except in the anomaly case where the provider captured more than the invoice total. Payment
 `status` is our own vocabulary — `Created`, `Pending`, `Captured`, `Failed`, `Cancelled` — not the
 provider's.
 
@@ -418,9 +419,11 @@ purpose** — the amount is the server's to decide. Anything sent in the body is
 ```
 
 `amount` is in minor units (paise), converted from the decimal total with `decimal` arithmetic
-only. Repeated calls within 15 minutes for the same unchanged balance return the **same** order,
-so a double-click, a refresh and a second tab converge on one payment attempt. Returns `409` when
-the invoice is a draft, cancelled or already settled, and `502` when the provider is unreachable.
+only. Opening an order reserves the invoice's balance under a unique index, so repeated and even
+simultaneous calls return the **same** order: a double-click, a refresh and a second tab converge
+on one payment attempt, and two attempts can never both consume the same balance. Returns `409`
+when the invoice is a draft, cancelled, already settled, or has an authorised payment still being
+confirmed, and `502` when the provider is unreachable.
 
 ### `POST /api/public/invoices/{token}/verify-payment`
 

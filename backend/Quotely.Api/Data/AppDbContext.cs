@@ -169,6 +169,10 @@ public class AppDbContext : IdentityDbContext<AppUser, IdentityRole<Guid>, Guid>
             // rather than by an application "if not exists" check, so a duplicate webhook and a
             // duplicate checkout callback racing each other still cannot double-count money.
             e.HasIndex(x => x.ProviderPaymentId).IsUnique();
+            // At most one live payment attempt per invoice, enforced by the database. Two
+            // concurrent create-order requests cannot both reserve the same balance: one insert
+            // wins and the other is handed the winner's order.
+            e.HasIndex(x => x.ReservationSlot).IsUnique();
             e.Property(x => x.Amount).HasPrecision(18, 2);
             e.Property(x => x.Currency).HasMaxLength(3).IsRequired();
             e.Property(x => x.Provider).HasMaxLength(30).IsRequired();

@@ -353,6 +353,8 @@ export interface PaymentSummary {
   total: number;
   paid: number;
   outstanding: number;
+  /** Non-zero only when the provider captured more than the invoice total — an anomaly. */
+  overpaidBy: number;
   currency: string;
   invoiceStatus: InvoiceStatus;
   canPay: boolean;

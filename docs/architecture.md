@@ -299,6 +299,27 @@ actually happened before anything is recorded.
 indexed, so a webhook and a checkout callback racing each other end with one row — the loser
 re-reads the winner's result. `WebhookEvents(Provider, EventId)` does the same for redeliveries.
 
+**One live attempt per invoice, also a constraint.** `Payments.ReservationSlot` holds the invoice
+id while an attempt is live and is null once it settles, under a filtered unique index. Opening an
+order therefore *reserves* the balance: a second concurrent request loses the insert and is handed
+the winner's order rather than a second way to pay the same money. Without this, six simultaneous
+requests produce six independently payable orders — a test demonstrates exactly that when the
+constraint is removed. Reservations lapse (15 minutes for an untouched order, 24 hours for an
+authorised payment) so an abandoned tab cannot lock an invoice out of being paid, and a part
+payment retires a stale order so the next one is repriced to what is actually owed.
+
+**order.paid is reconciliation, never invention.** Both `payment.captured` and `order.paid` are
+read for their `payload.payment.entity`, so `order.paid` names the *actual* payment by id and
+collapses onto the same record through the unique index — in either arrival order. An order-level
+event carrying no payment entity produces no outcome at all: there would be no payment id to
+deduplicate on, so we wait for `payment.captured` rather than inventing a successful payment from
+"the order is paid".
+
+**Overpayment is recorded, not hidden.** Normal use cannot exceed the balance. If a provider-side
+condition ever captures more than the total, the payment is recorded truthfully, `outstanding`
+clamps to zero for display, the invoice reads `Paid`, and the excess is reported as `overpaidBy`
+on the summary and shown to the owner. V2.3 does not attempt an automatic refund.
+
 **Ordering is not assumed.** Razorpay does not guarantee webhook order, so `PaymentStatus` is
 ranked and an incoming state may only be applied if it is at least as authoritative. A late
 `payment.authorized` cannot demote a captured payment.

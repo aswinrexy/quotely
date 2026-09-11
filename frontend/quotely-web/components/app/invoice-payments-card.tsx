@@ -27,9 +27,25 @@ const PAYMENT_TONES: Record<PaymentStatus, "neutral" | "blue" | "green" | "amber
 export function PaymentHistoryCard({ payments }: { payments: InvoicePayments | null }) {
   if (!payments || payments.payments.length === 0) return null;
 
+  const overpaid = payments.summary.overpaidBy > 0;
+
   return (
     <Card>
       <CardHeader title="Payment history" description="Recorded automatically as payments settle." />
+
+      {/* An overpayment needs a person to resolve it, so it is stated rather than left in a log. */}
+      {overpaid && (
+        <div className="border-b border-ash bg-amber-wash px-4 py-3">
+          <p className="flex items-center gap-1.5 text-body font-medium text-amber-ink">
+            <Icon.alert className="h-4 w-4 shrink-0" />
+            Overpaid by {formatMoney(payments.summary.overpaidBy, payments.summary.currency)}
+          </p>
+          <p className="mt-0.5 text-caption text-amber-ink">
+            More was captured than this invoice is for. Refund the difference through your Razorpay
+            dashboard.
+          </p>
+        </div>
+      )}
       <ul className="divide-y divide-ash">
         {payments.payments.map((payment) => (
           <li key={payment.id} className="px-4 py-3">

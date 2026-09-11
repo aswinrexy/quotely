@@ -172,7 +172,23 @@ public class RazorpayProviderTests
         var second = provider.ParseWebhook(body, Hmac(body, WebhookSecret), null);
 
         // Deterministic, so an identical redelivery still deduplicates.
-        first.EventId.Should().Be(second.EventId).And.HaveLength(64);
+        first.EventId.Should().Be(second.EventId);
+        // Prefixed, so a derived key can never collide with a real provider event id.
+        first.EventId.Should().StartWith("body:").And.HaveLength(69);
+    }
+
+    [Fact]
+    public void Two_event_types_with_otherwise_identical_bodies_get_distinct_fallback_keys()
+    {
+        // The fallback must not let a different kind of event be mistaken for one already seen.
+        var provider = NewProvider();
+        var captured = Body("payment.captured", "captured");
+        var authorized = Body("payment.authorized", "authorized");
+
+        var a = provider.ParseWebhook(captured, Hmac(captured, WebhookSecret), null);
+        var b = provider.ParseWebhook(authorized, Hmac(authorized, WebhookSecret), null);
+
+        a.EventId.Should().NotBe(b.EventId);
     }
 
     [Fact]

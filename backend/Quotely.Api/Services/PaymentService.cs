@@ -28,11 +28,17 @@ public interface IPaymentService
 public class PaymentService : IPaymentService
 {
     /// <summary>
-    /// How long an unused order is offered back to the same customer. Long enough to cover a
-    /// double-click, a refresh, a second tab or a dropped connection; short enough that a stale
-    /// order is not resurrected days later.
+    /// How long an unpaid order keeps its reservation. Long enough to cover a double-click, a
+    /// refresh, a second tab or a dropped connection; short enough that an abandoned attempt does
+    /// not lock the invoice out of being paid.
     /// </summary>
-    private static readonly TimeSpan OrderReuseWindow = TimeSpan.FromMinutes(15);
+    private static readonly TimeSpan OrderReservationWindow = TimeSpan.FromMinutes(15);
+
+    /// <summary>
+    /// An authorised payment is money the provider is holding, so its reservation lasts far
+    /// longer than an untouched order's — but not forever, in case a capture never arrives.
+    /// </summary>
+    private static readonly TimeSpan AuthorisedReservationWindow = TimeSpan.FromHours(24);
 
     private readonly AppDbContext _db;
     private readonly IPaymentProvider _provider;
@@ -53,74 +59,152 @@ public class PaymentService : IPaymentService
             throw new ApiException(System.Net.HttpStatusCode.ServiceUnavailable,
                 "Online payments are not available at the moment. Please contact the business.");
 
-        // The amount is computed here, from records, every time. Nothing the browser sends is
-        // consulted: the create-order request has no amount field at all.
-        var outstanding = await OutstandingAsync(invoice, ct);
-
         if (!invoice.AcceptsPayments)
             throw ApiException.Conflict(InvoiceNotPayableMessage(invoice));
 
-        if (outstanding <= 0)
-            throw ApiException.Conflict("This invoice has been paid in full.");
+        var strategy = _db.Database.CreateExecutionStrategy();
 
-        // A live order for the same balance is handed back rather than duplicated. This is what
-        // makes a double-click, a refresh and a second tab converge on one payment attempt.
-        // Evaluated here rather than inside the expression tree, which EF cannot translate.
-        var reuseCutoff = DateTime.UtcNow - OrderReuseWindow;
-
-        var reusable = await _db.Payments
-            .Where(p => p.InvoiceId == invoice.Id
-                        && p.Status == PaymentStatus.Created
-                        && p.ProviderPaymentId == null
-                        && p.Amount == outstanding
-                        && p.CreatedAt > reuseCutoff)
-            .OrderByDescending(p => p.CreatedAt)
-            .FirstOrDefaultAsync(ct);
-
-        if (reusable is not null)
+        return await strategy.ExecuteAsync(async () =>
         {
+            // Release anything whose reservation has lapsed, so an abandoned tab does not lock
+            // this invoice out of being paid.
+            await ReleaseExpiredReservationsAsync(invoice.Id, ct);
+
+            var live = await _db.Payments
+                .FirstOrDefaultAsync(p => p.ReservationSlot == invoice.Id, ct);
+
+            // The amount is computed here, from records, every time. Nothing the browser sends is
+            // consulted: the create-order request has no amount field at all.
+            var captured = await CapturedTotalAsync(invoice.Id, ct);
+            var outstanding = Math.Max(0m, invoice.GrandTotal - captured);
+
+            if (outstanding <= 0)
+                throw ApiException.Conflict("This invoice has been paid in full.");
+
+            if (live is not null)
+            {
+                // An authorised payment is already collecting this balance. Starting a second one
+                // would be how an invoice gets paid twice.
+                if (live.Status == PaymentStatus.Pending)
+                    throw ApiException.Conflict(
+                        "A payment on this invoice is being confirmed. Please wait a moment before trying again.");
+
+                // The live order still matches what is owed: hand the same one back. This is what
+                // makes a double-click, a refresh and a second tab converge on one attempt.
+                if (live.Amount == outstanding)
+                {
+                    _logger.LogInformation(
+                        "Reusing payment order {ProviderOrderId} for invoice {InvoiceId}",
+                        live.ProviderOrderId, invoice.Id);
+
+                    return (live, new ProviderOrder(
+                        live.ProviderOrderId, _provider.ToMinorUnits(live.Amount), live.Currency));
+                }
+
+                // The balance moved under it — a part payment landed — so the stale order is
+                // retired and its reservation freed before a correctly priced one is opened.
+                _logger.LogInformation(
+                    "Retiring payment order {ProviderOrderId}: reserved {Reserved} but {Outstanding} is now owed",
+                    live.ProviderOrderId, live.Amount, outstanding);
+
+                live.Status = PaymentStatus.Cancelled;
+                live.ReservationSlot = null;
+                await _db.SaveChangesAsync(ct);
+            }
+
+            var payment = new Payment
+            {
+                Id = Guid.NewGuid(),
+                InvoiceId = invoice.Id,
+                UserId = invoice.UserId,
+                Amount = outstanding,
+                Currency = invoice.Currency,
+                Status = PaymentStatus.Created,
+                Provider = _provider.Name,
+                // Taking the slot is what reserves the balance against a concurrent attempt.
+                ReservationSlot = invoice.Id,
+                CustomerName = invoice.CustomerName,
+                CustomerEmail = invoice.CustomerEmail
+            };
+
+            ProviderOrder order;
+            try
+            {
+                order = await _provider.CreateOrderAsync(
+                    new CreateOrderRequest(outstanding, invoice.Currency, invoice.InvoiceNumber, payment.Id), ct);
+            }
+            catch (PaymentProviderException ex)
+            {
+                _logger.LogWarning(ex, "Payment order creation failed for invoice {InvoiceId}", invoice.Id);
+                throw new ApiException(System.Net.HttpStatusCode.BadGateway, ex.Message);
+            }
+
+            payment.ProviderOrderId = order.OrderId;
+            _db.Payments.Add(payment);
+
+            try
+            {
+                await _db.SaveChangesAsync(ct);
+            }
+            catch (DbUpdateException)
+            {
+                // Another request took the slot between our read and our write. The unique index
+                // caught what an application check could not, and the caller is given the
+                // winner's order rather than a second way to pay the same balance. The order we
+                // opened at the provider is simply never used; unused orders expire on their own.
+                _db.ChangeTracker.Clear();
+
+                var winner = await _db.Payments.AsNoTracking()
+                    .FirstOrDefaultAsync(p => p.ReservationSlot == invoice.Id, ct);
+
+                if (winner is null) throw;
+
+                _logger.LogInformation(
+                    "Concurrent payment order for invoice {InvoiceId} resolved to {ProviderOrderId}",
+                    invoice.Id, winner.ProviderOrderId);
+
+                return (winner, new ProviderOrder(
+                    winner.ProviderOrderId, _provider.ToMinorUnits(winner.Amount), winner.Currency));
+            }
+
             _logger.LogInformation(
-                "Reusing payment order {ProviderOrderId} for invoice {InvoiceId}",
-                reusable.ProviderOrderId, invoice.Id);
+                "Created payment order {ProviderOrderId} for invoice {InvoiceId} ({Amount} {Currency})",
+                order.OrderId, invoice.Id, outstanding, invoice.Currency);
 
-            return (reusable, new ProviderOrder(
-                reusable.ProviderOrderId, _provider.ToMinorUnits(reusable.Amount), reusable.Currency));
+            return (payment, order);
+        });
+    }
+
+    /// <summary>
+    /// Frees reservations that have lapsed. An untouched order holds the balance only briefly;
+    /// an authorised payment holds it far longer, because the provider really is holding money.
+    /// </summary>
+    private async Task ReleaseExpiredReservationsAsync(Guid invoiceId, CancellationToken ct)
+    {
+        var now = DateTime.UtcNow;
+        var createdCutoff = now - OrderReservationWindow;
+        var authorisedCutoff = now - AuthorisedReservationWindow;
+
+        var stale = await _db.Payments
+            .Where(p => p.ReservationSlot == invoiceId
+                        && ((p.Status == PaymentStatus.Created && p.CreatedAt < createdCutoff)
+                            || (p.Status == PaymentStatus.Pending && p.CreatedAt < authorisedCutoff)))
+            .ToListAsync(ct);
+
+        if (stale.Count == 0) return;
+
+        foreach (var payment in stale)
+        {
+            // The reservation lapses; the payment row itself is kept as a record of the attempt.
+            payment.ReservationSlot = null;
+            if (payment.Status == PaymentStatus.Created) payment.Status = PaymentStatus.Cancelled;
+
+            _logger.LogInformation(
+                "Released lapsed reservation on payment order {ProviderOrderId} for invoice {InvoiceId}",
+                payment.ProviderOrderId, invoiceId);
         }
 
-        var payment = new Payment
-        {
-            Id = Guid.NewGuid(),
-            InvoiceId = invoice.Id,
-            UserId = invoice.UserId,
-            Amount = outstanding,
-            Currency = invoice.Currency,
-            Status = PaymentStatus.Created,
-            Provider = _provider.Name,
-            CustomerName = invoice.CustomerName,
-            CustomerEmail = invoice.CustomerEmail
-        };
-
-        ProviderOrder order;
-        try
-        {
-            order = await _provider.CreateOrderAsync(
-                new CreateOrderRequest(outstanding, invoice.Currency, invoice.InvoiceNumber, payment.Id), ct);
-        }
-        catch (PaymentProviderException ex)
-        {
-            _logger.LogWarning(ex, "Payment order creation failed for invoice {InvoiceId}", invoice.Id);
-            throw new ApiException(System.Net.HttpStatusCode.BadGateway, ex.Message);
-        }
-
-        payment.ProviderOrderId = order.OrderId;
-        _db.Payments.Add(payment);
         await _db.SaveChangesAsync(ct);
-
-        _logger.LogInformation(
-            "Created payment order {ProviderOrderId} for invoice {InvoiceId} ({Amount} {Currency})",
-            order.OrderId, invoice.Id, outstanding, invoice.Currency);
-
-        return (payment, order);
     }
 
     // ---- recording an outcome ------------------------------------------
@@ -177,6 +261,9 @@ public class PaymentService : IPaymentService
                     Provider = template.Provider,
                     ProviderOrderId = template.ProviderOrderId,
                     Status = PaymentStatus.Created,
+                    // Not a reservation: this row is being created to record an outcome that has
+                    // already happened, not to hold the balance for a future attempt.
+                    ReservationSlot = null,
                     CustomerName = template.CustomerName,
                     CustomerEmail = template.CustomerEmail
                 };
@@ -253,6 +340,10 @@ public class PaymentService : IPaymentService
         var alreadyCaptured = payment.Status == PaymentStatus.Captured;
 
         payment.Status = outcome.Status;
+
+        // A settled attempt no longer reserves the balance: captured money moves into the paid
+        // total, and a failed or cancelled one frees the invoice to be paid again.
+        if (!payment.IsLiveAttempt) payment.ReservationSlot = null;
         payment.Method = outcome.Method ?? payment.Method;
         payment.FailureReason = outcome.Status == PaymentStatus.Failed ? outcome.FailureReason : null;
         payment.ConcurrencyStamp = Guid.NewGuid();
@@ -304,10 +395,11 @@ public class PaymentService : IPaymentService
 
         if (paid > invoice.GrandTotal)
         {
-            // Recorded truthfully — the money is real — but flagged: it needs a human decision.
+            // Recorded truthfully — the money is real and the provider took it — but flagged for
+            // a human. V2.3 deliberately does not attempt an automatic refund.
             _logger.LogWarning(
-                "Invoice {InvoiceId} is overpaid: {Paid} captured against a total of {Total} {Currency}",
-                invoiceId, paid, invoice.GrandTotal, invoice.Currency);
+                "Invoice {InvoiceId} is overpaid by {Excess}: {Paid} captured against a total of {Total} {Currency}",
+                invoiceId, paid - invoice.GrandTotal, paid, invoice.GrandTotal, invoice.Currency);
         }
 
         return Summarise(invoice, paid, await HasPendingAsync(invoiceId, ct));
@@ -366,15 +458,17 @@ public class PaymentService : IPaymentService
 
     private static PaymentSummaryDto Summarise(Invoice invoice, decimal paid, bool hasPending)
     {
-        // Clamped defensively: a negative outstanding would be nonsense on screen, and the
-        // overpayment itself is logged as a warning rather than hidden.
+        // Clamped so the customer is never shown a negative balance. The excess is not discarded:
+        // it is reported separately, as an anomaly the owner has to resolve.
         var outstanding = Math.Max(0m, invoice.GrandTotal - paid);
+        var overpaidBy = Math.Max(0m, paid - invoice.GrandTotal);
 
         return new PaymentSummaryDto
         {
             Total = invoice.GrandTotal,
             Paid = paid,
             Outstanding = outstanding,
+            OverpaidBy = overpaidBy,
             Currency = invoice.Currency,
             InvoiceStatus = invoice.Status.ToString(),
             CanPay = invoice.AcceptsPayments && outstanding > 0,

@@ -12,6 +12,12 @@ public record PaymentSummaryDto
     public decimal Total { get; init; }
     public decimal Paid { get; init; }
     public decimal Outstanding { get; init; }
+    /// <summary>
+    /// Non-zero only in the anomaly case where the provider captured more than the invoice total.
+    /// Surfaced to the owner rather than hidden, because resolving it needs a human: V2.3 does
+    /// not issue refunds.
+    /// </summary>
+    public decimal OverpaidBy { get; init; }
     public string Currency { get; init; } = "INR";
     public string InvoiceStatus { get; init; } = nameof(Models.InvoiceStatus.Draft);
     /// <summary>True when a customer holding the public link may start a payment right now.</summary>

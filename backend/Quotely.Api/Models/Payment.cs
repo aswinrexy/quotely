@@ -54,7 +54,21 @@ public class Payment
     /// <summary>Optimistic concurrency guard for simultaneous verification and webhook processing.</summary>
     public Guid ConcurrencyStamp { get; set; } = Guid.NewGuid();
 
+    /// <summary>
+    /// Holds this invoice's single payment slot while the attempt is live, and is null once it
+    /// settles. A unique index over this column is what stops two browser tabs from each opening
+    /// an order for the same outstanding balance: the second insert loses at the database, not at
+    /// an application "if not exists" check that two threads can pass simultaneously.
+    ///
+    /// The value is the invoice id, so "one live reservation per invoice" falls straight out of
+    /// the uniqueness constraint.
+    /// </summary>
+    public Guid? ReservationSlot { get; set; }
+
     public bool IsSettled => Status == PaymentStatus.Captured;
+
+    /// <summary>An attempt still holding money, or about to: Created and Pending both reserve.</summary>
+    public bool IsLiveAttempt => Status is PaymentStatus.Created or PaymentStatus.Pending;
 }
 
 public static class PaymentProviders

@@ -162,11 +162,15 @@ public class RazorpayPaymentProvider : IPaymentProvider
             var root = document.RootElement;
             var eventType = root.TryGetProperty("event", out var evt) ? evt.GetString() ?? string.Empty : string.Empty;
 
-            // Razorpay sends x-razorpay-event-id; fall back to a deterministic hash of the body so
-            // a delivery without the header still cannot be processed twice.
+            // Razorpay always sends x-razorpay-event-id; the fallback exists so a delivery that
+            // somehow lacks it still cannot be processed twice. The event type is folded into the
+            // hash so two different event kinds can never collide on one key even if their bodies
+            // were byte-identical, and the "body:" prefix keeps a derived key from ever colliding
+            // with a real provider event id.
             var eventId = !string.IsNullOrWhiteSpace(eventIdHeader)
                 ? eventIdHeader
-                : Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(rawBody))).ToLowerInvariant();
+                : "body:" + Convert.ToHexString(
+                    SHA256.HashData(Encoding.UTF8.GetBytes($"{eventType}\n{rawBody}"))).ToLowerInvariant();
 
             return new WebhookNotification
             {
@@ -180,8 +184,13 @@ public class RazorpayPaymentProvider : IPaymentProvider
     // ---- razorpay → domain mapping -------------------------------------
 
     /// <summary>
-    /// Pulls the payment entity out of whichever envelope the event uses. order.paid carries both
-    /// an order and a payment; the payment.* events carry only a payment.
+    /// Pulls the payment entity out of whichever envelope the event uses.
+    ///
+    /// order.paid carries both an order and a payment; the payment.* events carry only a payment.
+    /// We read the payment entity in every case, so order.paid identifies the *actual* Razorpay
+    /// payment by id rather than asserting that "the order is paid" in the abstract. An event
+    /// without a payment entity yields no outcome at all: we never invent a successful payment
+    /// from an order-level signal alone, because there would be no payment id to deduplicate on.
     /// </summary>
     private static PaymentOutcome? ExtractOutcome(JsonElement root, string eventType)
     {

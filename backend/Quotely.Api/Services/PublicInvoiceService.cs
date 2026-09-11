@@ -158,15 +158,22 @@ public class PublicInvoiceService : IPublicInvoiceService
                 "We could not confirm this payment yet. It will be updated automatically once the provider confirms it.");
         }
 
-        if (!string.Equals(outcome.ProviderOrderId, request.RazorpayOrderId, StringComparison.Ordinal))
-            throw ApiException.BadRequest("This payment does not belong to this invoice.");
-
-        // One shared path into the database, used by the webhook too.
-        var payment = await _payments.ProcessOutcomeAsync(outcome with
+        // The provider must agree that this payment belongs to the order we opened. Checking it
+        // here means the browser's claimed pairing is corroborated rather than believed.
+        if (!string.Equals(outcome.ProviderOrderId, request.RazorpayOrderId, StringComparison.Ordinal) ||
+            !string.Equals(outcome.ProviderPaymentId, request.RazorpayPaymentId, StringComparison.Ordinal))
         {
-            ProviderPaymentId = request.RazorpayPaymentId,
-            ProviderOrderId = request.RazorpayOrderId
-        }, ct);
+            _logger.LogWarning(
+                "Rejected verification: the provider reports payment {ActualPayment} on order {ActualOrder}, " +
+                "not the pairing that was submitted for invoice {InvoiceId}",
+                outcome.ProviderPaymentId, outcome.ProviderOrderId, invoice.Id);
+            throw ApiException.BadRequest("This payment does not belong to this invoice.");
+        }
+
+        // One shared path into the database, used by the webhook too. The outcome is passed
+        // through exactly as the provider stated it — no field is substituted with a value the
+        // browser supplied.
+        var payment = await _payments.ProcessOutcomeAsync(outcome, ct);
 
         var summary = await _payments.GetSummaryAsync(invoice.Id, ct);
 
