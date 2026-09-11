@@ -6,7 +6,7 @@ import { api } from "@/lib/api";
 import { QuotationForm } from "@/components/app/quotation-form";
 import { PageHeader } from "@/components/app/page-header";
 import { Card } from "@/components/ui/card";
-import { ErrorState, LoadingState } from "@/components/ui/states";
+import { DetailSkeleton, ErrorState } from "@/components/ui/states";
 import type { Quotation } from "@/types";
 
 export default function EditQuotationPage() {
@@ -32,9 +32,7 @@ export default function EditQuotationPage() {
           <ErrorState message={error} />
         </Card>
       ) : !quotation ? (
-        <Card>
-          <LoadingState />
-        </Card>
+        <DetailSkeleton />
       ) : (
         <QuotationForm quotation={quotation} />
       )}

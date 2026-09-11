@@ -70,17 +70,17 @@ export function ResponseDialog({
 
   return (
     <div className="fixed inset-0 z-50 flex items-end justify-center p-0 sm:items-center sm:p-4">
-      <div className="absolute inset-0 bg-slate-900/50" onClick={() => !submitting && onCancel()} aria-hidden />
+      <div className="absolute inset-0 bg-midnight/30" onClick={() => !submitting && onCancel()} aria-hidden />
       <div
         role="dialog"
         aria-modal="true"
         aria-label={accepting ? "Accept quotation" : "Reject quotation"}
-        className="relative max-h-[92vh] w-full max-w-md overflow-y-auto rounded-t-2xl border border-slate-200 bg-white p-5 shadow-xl sm:rounded-2xl"
+        className="relative max-h-[92vh] w-full max-w-md overflow-y-auto rounded-t-lgcard border border-ash bg-canvas p-5 shadow-overlay sm:rounded-lgcard"
       >
-        <h2 className="text-lg font-semibold text-slate-900">
+        <h2 className="font-display text-subheading text-charcoal">
           {accepting ? "Accept quotation?" : "Reject quotation?"}
         </h2>
-        <p className="mt-1 text-sm text-slate-500">
+        <p className="mt-1 text-body text-fog">
           {accepting
             ? "Let the business know who approved this quotation."
             : "Let the business know who responded, and why if you would like to."}
@@ -123,16 +123,22 @@ export function ResponseDialog({
           </Field>
 
           {error && (
-            <p role="alert" className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">
+            <p role="alert" className="rounded-btn border border-ash bg-rose-wash px-3 py-2 text-body text-rose-ink">
               {error}
             </p>
           )}
 
           <div className="flex flex-col-reverse gap-2 pt-1 sm:flex-row sm:justify-end">
-            <Button type="button" variant="secondary" onClick={onCancel} disabled={submitting}>
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={onCancel}
+              disabled={submitting}
+              className="h-11 w-full sm:h-9 sm:w-auto"
+            >
               Cancel
             </Button>
-            <Button type="submit" variant={accepting ? "primary" : "danger"} loading={submitting}>
+            <Button type="submit" loading={submitting} className="h-11 w-full sm:h-9 sm:w-auto">
               {accepting ? "Confirm acceptance" : "Confirm rejection"}
             </Button>
           </div>

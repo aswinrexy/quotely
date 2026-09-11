@@ -1,116 +1,119 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
+import Link from "next/link";
 import { useAuth } from "@/lib/auth";
 import { Spinner } from "@/components/ui/states";
-import { cn } from "@/lib/cn";
+import { Icon } from "@/components/ui/icons";
+import { PRIMARY_NAV, SECONDARY_NAV, SidebarContent, isActive } from "@/components/app/sidebar";
 
-const NAV = [
-  { href: "/dashboard", label: "Dashboard" },
-  { href: "/quotations", label: "Quotations" },
-  { href: "/invoices", label: "Invoices" },
-  { href: "/customers", label: "Customers" },
-  { href: "/products", label: "Products & Services" },
-  { href: "/business-profile", label: "Business Profile" },
-];
+/** Title shown in the top bar, resolved from the nav rather than duplicated per page. */
+function useSectionTitle() {
+  const pathname = usePathname();
+  const match = [...PRIMARY_NAV, ...SECONDARY_NAV].find((item) => isActive(pathname, item.href));
+  return match?.label ?? "Quotely";
+}
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   const { user, ready, logout } = useAuth();
   const router = useRouter();
   const pathname = usePathname();
   const [menuOpen, setMenuOpen] = useState(false);
+  const section = useSectionTitle();
 
   useEffect(() => {
     if (ready && !user) router.replace("/login");
   }, [ready, user, router]);
 
+  // The drawer is a page-level overlay: close it when the route underneath changes.
+  useEffect(() => {
+    setMenuOpen(false);
+  }, [pathname]);
+
+  useEffect(() => {
+    document.body.style.overflow = menuOpen ? "hidden" : "";
+    return () => {
+      document.body.style.overflow = "";
+    };
+  }, [menuOpen]);
+
   if (!ready || !user) {
     return (
       <div className="flex min-h-screen items-center justify-center">
         <Spinner />
+        <span className="sr-only">Loading…</span>
       </div>
     );
   }
 
   const sidebar = (
-    <div className="flex h-full flex-col">
-      <div className="px-5 py-5">
-        <Link href="/dashboard" className="text-xl font-semibold tracking-tight text-slate-900">
-          Quote<span className="text-blue-600">ly</span>
-        </Link>
-      </div>
-
-      <nav className="flex-1 space-y-1 px-3">
-        {NAV.map((item) => {
-          const active = pathname === item.href || pathname.startsWith(`${item.href}/`);
-          return (
-            <Link
-              key={item.href}
-              href={item.href}
-              onClick={() => setMenuOpen(false)}
-              className={cn(
-                "block rounded-lg px-3 py-2 text-sm font-medium transition-colors",
-                active ? "bg-blue-50 text-blue-700" : "text-slate-600 hover:bg-slate-100 hover:text-slate-900",
-              )}
-            >
-              {item.label}
-            </Link>
-          );
-        })}
-      </nav>
-
-      <div className="border-t border-slate-200 p-3">
-        <div className="px-3 py-2">
-          <p className="truncate text-sm font-medium text-slate-900">{user.fullName || "Account"}</p>
-          <p className="truncate text-xs text-slate-500">{user.email}</p>
-        </div>
-        <Link
-          href="/business-profile"
-          onClick={() => setMenuOpen(false)}
-          className="block rounded-lg px-3 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100 hover:text-slate-900"
-        >
-          Settings
-        </Link>
-        <button
-          onClick={logout}
-          className="block w-full rounded-lg px-3 py-2 text-left text-sm font-medium text-slate-600 hover:bg-slate-100 hover:text-slate-900"
-        >
-          Logout
-        </button>
-      </div>
-    </div>
+    <SidebarContent
+      email={user.email}
+      fullName={user.fullName}
+      onLogout={logout}
+      onNavigate={() => setMenuOpen(false)}
+    />
   );
 
   return (
     <div className="min-h-screen lg:flex">
-      <aside className="hidden w-64 shrink-0 border-r border-slate-200 bg-white lg:block">{sidebar}</aside>
+      <a
+        href="#main"
+        className="sr-only focus:not-sr-only focus:absolute focus:left-4 focus:top-4 focus:z-100 focus:rounded-btn focus:bg-midnight focus:px-3 focus:py-2 focus:text-body focus:text-canvas"
+      >
+        Skip to content
+      </a>
 
-      <header className="sticky top-0 z-30 flex items-center justify-between border-b border-slate-200 bg-white px-4 py-3 lg:hidden">
-        <Link href="/dashboard" className="text-lg font-semibold tracking-tight text-slate-900">
-          Quote<span className="text-blue-600">ly</span>
-        </Link>
-        <button
-          onClick={() => setMenuOpen((open) => !open)}
-          aria-label="Toggle navigation"
-          aria-expanded={menuOpen}
-          className="rounded-lg border border-slate-300 px-3 py-1.5 text-sm text-slate-700"
-        >
-          Menu
-        </button>
-      </header>
+      <aside className="hidden w-60 shrink-0 border-r border-ash bg-canvas lg:sticky lg:top-0 lg:block lg:h-screen">
+        {sidebar}
+      </aside>
 
-      {menuOpen && (
-        <div className="fixed inset-0 z-40 lg:hidden">
-          <div className="absolute inset-0 bg-slate-900/40" onClick={() => setMenuOpen(false)} aria-hidden />
-          <aside className="relative h-full w-64 border-r border-slate-200 bg-white">{sidebar}</aside>
-        </div>
-      )}
+      <div className="flex min-w-0 flex-1 flex-col">
+        {/* A quiet top bar: where you are, and nothing else competing for attention. */}
+        <header className="sticky top-0 z-30 flex h-14 items-center gap-3 border-b border-ash bg-canvas/95 px-4 backdrop-blur-sm sm:px-6">
+          <button
+            onClick={() => setMenuOpen(true)}
+            aria-label="Open navigation"
+            aria-expanded={menuOpen}
+            className="-ml-1 rounded-btn p-2 text-steel transition-colors duration-150 ease-out hover:bg-paper hover:text-charcoal lg:hidden"
+          >
+            <Icon.menu />
+          </button>
 
-      <main className="min-w-0 flex-1">
-        <div className="mx-auto max-w-6xl px-4 py-6 sm:px-6 lg:px-8 lg:py-8">{children}</div>
-      </main>
+          <Link href="/dashboard" className="font-display text-body-lg text-charcoal lg:hidden">
+            Quote<span className="text-electric">ly</span>
+          </Link>
+
+          <p className="hidden min-w-0 truncate text-body font-medium text-charcoal lg:block">
+            {section}
+          </p>
+        </header>
+
+        {menuOpen && (
+          <div className="fixed inset-0 z-50 lg:hidden">
+            <div
+              className="absolute inset-0 bg-midnight/30"
+              onClick={() => setMenuOpen(false)}
+              aria-hidden
+            />
+            <aside className="relative h-full w-64 border-r border-ash bg-canvas">
+              <button
+                onClick={() => setMenuOpen(false)}
+                aria-label="Close navigation"
+                className="absolute right-2 top-3.5 rounded-btn p-2 text-steel hover:bg-paper hover:text-charcoal"
+              >
+                <Icon.close />
+              </button>
+              {sidebar}
+            </aside>
+          </div>
+        )}
+
+        <main id="main" className="min-w-0 flex-1">
+          <div className="mx-auto max-w-[1200px] px-4 py-6 sm:px-6 lg:py-8">{children}</div>
+        </main>
+      </div>
     </div>
   );
 }

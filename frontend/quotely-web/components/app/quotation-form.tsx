@@ -8,6 +8,7 @@ import { addDaysIso, formatMoney, todayIso } from "@/lib/format";
 import { calculateLine, calculateTotals } from "@/lib/money";
 import { useToast } from "@/components/ui/toast";
 import { Button } from "@/components/ui/button";
+import { Icon } from "@/components/ui/icons";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
 import { Field, Input, Select, Textarea, inputClass } from "@/components/ui/field";
 import { LoadingState } from "@/components/ui/states";
@@ -237,9 +238,9 @@ export function QuotationForm({ quotation, initialCustomerId }: Props) {
   return (
     <div className="space-y-6">
       {errors.length > 0 && (
-        <div role="alert" className="rounded-xl border border-red-200 bg-red-50 px-4 py-3">
-          <p className="text-sm font-medium text-red-800">Please fix the following:</p>
-          <ul className="mt-1 list-disc space-y-0.5 pl-5 text-sm text-red-700">
+        <div role="alert" className="rounded-card border border-ash bg-rose-wash px-4 py-3">
+          <p className="text-body font-medium text-rose-ink">Please fix the following:</p>
+          <ul className="mt-1 list-disc space-y-0.5 pl-5 text-body text-rose-ink">
             {errors.map((message) => (
               <li key={message}>{message}</li>
             ))}
@@ -248,7 +249,7 @@ export function QuotationForm({ quotation, initialCustomerId }: Props) {
       )}
 
       {customers.length === 0 && (
-        <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+        <div className="rounded-card border border-ash bg-amber-wash px-4 py-3 text-body text-amber-ink">
           You have no customers yet.{" "}
           <Link href="/customers/new" className="font-medium underline">
             Add a customer
@@ -317,7 +318,7 @@ export function QuotationForm({ quotation, initialCustomerId }: Props) {
         />
 
         <div className="hidden lg:block">
-          <div className="grid grid-cols-[minmax(0,3fr)_90px_120px_110px_90px_120px_40px] gap-2 border-b border-slate-200 bg-slate-50 px-4 py-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
+          <div className="grid grid-cols-[minmax(0,3fr)_90px_120px_110px_90px_120px_40px] gap-2 border-b border-ash bg-paper px-4 py-2 text-caption font-semibold uppercase tracking-wide text-fog">
             <span>Product / Service</span>
             <span className="text-right">Qty</span>
             <span className="text-right">Unit price</span>
@@ -328,7 +329,7 @@ export function QuotationForm({ quotation, initialCustomerId }: Props) {
           </div>
         </div>
 
-        <div className="divide-y divide-slate-100">
+        <div className="divide-y divide-ash">
           {rows.map((row, index) => {
             const line = calculateLine({
               quantity: toNumber(row.quantity),
@@ -364,10 +365,10 @@ export function QuotationForm({ quotation, initialCustomerId }: Props) {
                       value={row.description}
                       onChange={(e) => updateRow(row.key, { description: e.target.value })}
                       placeholder="Optional detail shown on the PDF"
-                      className="text-xs"
+                      className="text-caption"
                     />
                     <div className="lg:hidden">
-                      <label className="text-xs font-medium text-slate-500">Unit</label>
+                      <label className="text-caption font-medium text-fog">Unit</label>
                       <Select value={row.unit} onChange={(e) => updateRow(row.key, { unit: e.target.value })}>
                         {UNITS.map((unit) => (
                           <option key={unit} value={unit}>
@@ -380,7 +381,7 @@ export function QuotationForm({ quotation, initialCustomerId }: Props) {
 
                   <div className="grid grid-cols-2 gap-3 lg:contents">
                     <label className="lg:hidden">
-                      <span className="text-xs font-medium text-slate-500">Qty</span>
+                      <span className="text-caption font-medium text-fog">Qty</span>
                       <QuantityInput row={row} onChange={updateRow} />
                     </label>
                     <div className="hidden lg:block">
@@ -389,7 +390,7 @@ export function QuotationForm({ quotation, initialCustomerId }: Props) {
                         aria-label={`Unit for line ${index + 1}`}
                         value={row.unit}
                         onChange={(e) => updateRow(row.key, { unit: e.target.value })}
-                        className="mt-1 w-full rounded-md border border-slate-200 bg-white px-1 py-1 text-xs text-slate-600"
+                        className="mt-1 w-full rounded-input border border-ash bg-canvas px-1 py-1 text-caption text-steel"
                       >
                         {UNITS.map((unit) => (
                           <option key={unit} value={unit}>
@@ -400,7 +401,7 @@ export function QuotationForm({ quotation, initialCustomerId }: Props) {
                     </div>
 
                     <label className="lg:hidden">
-                      <span className="text-xs font-medium text-slate-500">Unit price</span>
+                      <span className="text-caption font-medium text-fog">Unit price</span>
                       <MoneyInput field="unitPrice" row={row} onChange={updateRow} />
                     </label>
                     <div className="hidden lg:block">
@@ -408,7 +409,7 @@ export function QuotationForm({ quotation, initialCustomerId }: Props) {
                     </div>
 
                     <label className="lg:hidden">
-                      <span className="text-xs font-medium text-slate-500">Discount</span>
+                      <span className="text-caption font-medium text-fog">Discount</span>
                       <MoneyInput field="discount" row={row} onChange={updateRow} />
                     </label>
                     <div className="hidden lg:block">
@@ -416,7 +417,7 @@ export function QuotationForm({ quotation, initialCustomerId }: Props) {
                     </div>
 
                     <label className="lg:hidden">
-                      <span className="text-xs font-medium text-slate-500">Tax %</span>
+                      <span className="text-caption font-medium text-fog">Tax %</span>
                       <MoneyInput field="taxRate" row={row} onChange={updateRow} max={100} />
                     </label>
                     <div className="hidden lg:block">
@@ -425,8 +426,8 @@ export function QuotationForm({ quotation, initialCustomerId }: Props) {
                   </div>
 
                   <div className="flex items-center justify-between lg:block lg:pt-2 lg:text-right">
-                    <span className="text-xs font-medium text-slate-500 lg:hidden">Line total</span>
-                    <span className="text-sm font-semibold text-slate-900">
+                    <span className="text-caption font-medium text-fog lg:hidden">Line total</span>
+                    <span className="text-body font-semibold text-charcoal">
                       {formatMoney(line.lineTotal, currency)}
                     </span>
                   </div>
@@ -437,7 +438,7 @@ export function QuotationForm({ quotation, initialCustomerId }: Props) {
                       onClick={() => setRows((current) => current.filter((r) => r.key !== row.key))}
                       disabled={rows.length === 1}
                       aria-label={`Remove line ${index + 1}`}
-                      className="rounded-md px-2 py-1 text-xs font-medium text-slate-500 hover:bg-slate-100 hover:text-red-600 disabled:opacity-40"
+                      className="rounded-input px-2 py-1 text-caption font-medium text-fog hover:bg-paper hover:text-rose-ink disabled:opacity-40"
                     >
                       Remove
                     </button>
@@ -448,7 +449,7 @@ export function QuotationForm({ quotation, initialCustomerId }: Props) {
           })}
         </div>
 
-        <div className="border-t border-slate-200 px-4 py-3">
+        <div className="border-t border-ash px-4 py-3">
           <Button type="button" variant="secondary" size="sm" onClick={() => setRows((r) => [...r, emptyRow()])}>
             + Add item
           </Button>
@@ -475,23 +476,24 @@ export function QuotationForm({ quotation, initialCustomerId }: Props) {
 
         <Card className="h-fit">
           <CardHeader title="Summary" />
-          <CardBody className="space-y-2 text-sm">
+          <CardBody className="space-y-2">
             <SummaryRow label="Subtotal" value={formatMoney(totals.subtotal, currency)} />
             <SummaryRow label="Discount" value={`-${formatMoney(totals.discountTotal, currency)}`} />
             <SummaryRow label="Tax" value={formatMoney(totals.taxTotal, currency)} />
-            <div className="mt-3 flex items-center justify-between rounded-lg bg-blue-50 px-3 py-3">
-              <span className="text-sm font-semibold text-blue-700">TOTAL</span>
-              <span className="text-lg font-bold text-blue-700">
+            <div className="mt-3 flex items-center justify-between border-t border-smoke pt-3">
+              <span className="text-body font-semibold text-charcoal">Total</span>
+              <span className="text-body-xl font-semibold tabular-nums text-charcoal">
                 {formatMoney(totals.grandTotal, currency)}
               </span>
             </div>
-            <p className="pt-1 text-xs text-slate-500">
+            <p className="pt-1 text-caption text-fog">
               Totals are confirmed by the server when you save.
             </p>
           </CardBody>
         </Card>
       </div>
 
+      {/* One primary action; saving is the commitment, the PDF is a convenience. */}
       <div className="flex flex-wrap justify-end gap-2 pb-4">
         <Button
           type="button"
@@ -500,11 +502,12 @@ export function QuotationForm({ quotation, initialCustomerId }: Props) {
         >
           Cancel
         </Button>
-        <Button type="button" variant="secondary" onClick={onSave} loading={saving}>
-          {quotation ? "Save changes" : "Save draft"}
+        <Button type="button" variant="secondary" onClick={onGeneratePdf} loading={generating}>
+          <Icon.download className="h-4 w-4" />
+          Save &amp; download PDF
         </Button>
-        <Button type="button" onClick={onGeneratePdf} loading={generating}>
-          Generate PDF
+        <Button type="button" onClick={onSave} loading={saving}>
+          {quotation ? "Save changes" : "Save quotation"}
         </Button>
       </div>
     </div>
@@ -514,8 +517,8 @@ export function QuotationForm({ quotation, initialCustomerId }: Props) {
 function SummaryRow({ label, value }: { label: string; value: string }) {
   return (
     <div className="flex items-center justify-between">
-      <span className="text-slate-500">{label}</span>
-      <span className="text-slate-900">{value}</span>
+      <span className="text-body text-fog">{label}</span>
+      <span className="text-body tabular-nums text-charcoal">{value}</span>
     </div>
   );
 }

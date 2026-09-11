@@ -45,8 +45,8 @@ export default function RegisterPage() {
 
   return (
     <div>
-      <h1 className="text-lg font-semibold text-slate-900">Create your account</h1>
-      <p className="mt-1 text-sm text-slate-500">Start sending professional quotations today.</p>
+      <h1 className="font-display text-subheading text-charcoal">Create your account</h1>
+      <p className="mt-1 text-body text-fog">Start sending professional quotations today.</p>
 
       <form onSubmit={onSubmit} className="mt-6 space-y-4" noValidate>
         <Field label="Your name" htmlFor="fullName" required>
@@ -94,7 +94,7 @@ export default function RegisterPage() {
         </Field>
 
         {error && (
-          <p role="alert" className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">
+          <p role="alert" className="rounded-btn border border-ash bg-rose-wash px-3 py-2 text-body text-rose-ink">
             {error}
           </p>
         )}
@@ -104,9 +104,9 @@ export default function RegisterPage() {
         </Button>
       </form>
 
-      <p className="mt-5 text-center text-sm text-slate-500">
+      <p className="mt-5 text-center text-body text-fog">
         Already have an account?{" "}
-        <Link href="/login" className="font-medium text-blue-600 hover:underline">
+        <Link href="/login" className="font-medium text-electric hover:underline">
           Sign in
         </Link>
       </p>

@@ -8,9 +8,21 @@ import { useToast } from "@/components/ui/toast";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { ConfirmDialog } from "@/components/ui/dialog";
-import { Input } from "@/components/ui/field";
-import { EmptyState, ErrorState, LoadingState } from "@/components/ui/states";
-import { Pagination, Table, TableWrap, Td, Th } from "@/components/ui/table";
+import { SearchInput } from "@/components/ui/field";
+import { EmptyState, ErrorState, TableSkeleton } from "@/components/ui/states";
+import { Icon } from "@/components/ui/icons";
+import {
+  Amount,
+  MobileFacts,
+  MobileList,
+  MobileRow,
+  Pagination,
+  Table,
+  TableWrap,
+  Td,
+  Th,
+  Tr,
+} from "@/components/ui/table";
 import { PageHeader } from "@/components/app/page-header";
 import type { BusinessProfile, PagedResult, Product } from "@/types";
 
@@ -66,7 +78,7 @@ export default function ProductsPage() {
     setDeleting(true);
     try {
       await api.delete(`/api/products/${pendingDelete.id}`);
-      toast("Product deleted.", "success");
+      toast("Item deleted", "success");
       setPendingDelete(null);
       await load();
     } catch (err) {
@@ -82,27 +94,30 @@ export default function ProductsPage() {
     <>
       <PageHeader
         title="Products & Services"
-        description="Your catalogue — pick from these when building a quotation."
+        description="Build your reusable pricing catalogue."
         action={
           <Link href="/products/new">
-            <Button>New item</Button>
+            <Button>
+              <Icon.plus className="h-4 w-4" />
+              Add item
+            </Button>
           </Link>
         }
       />
 
       <Card>
-        <div className="border-b border-slate-200 px-4 py-3">
-          <Input
+        <div className="border-b border-ash p-3">
+          <SearchInput
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search products and services"
-            aria-label="Search products"
+            placeholder="Search products and services…"
+            aria-label="Search products and services"
             className="sm:max-w-sm"
           />
         </div>
 
         {loading ? (
-          <LoadingState />
+          <TableSkeleton rows={6} columns={5} />
         ) : error ? (
           <ErrorState message={error} onRetry={load} />
         ) : isEmpty ? (
@@ -116,7 +131,7 @@ export default function ProductsPage() {
             action={
               !debounced && (
                 <Link href="/products/new">
-                  <Button>New item</Button>
+                  <Button>Add item</Button>
                 </Link>
               )
             }
@@ -136,16 +151,20 @@ export default function ProductsPage() {
                 </thead>
                 <tbody>
                   {result!.items.map((product) => (
-                    <tr key={product.id} className="hover:bg-slate-50">
+                    <Tr key={product.id}>
                       <Td>
-                        <p className="font-medium text-slate-900">{product.name}</p>
+                        <p className="font-medium text-charcoal">{product.name}</p>
                         {product.description && (
-                          <p className="mt-0.5 line-clamp-1 text-xs text-slate-500">{product.description}</p>
+                          <p className="mt-0.5 line-clamp-1 text-caption text-fog">{product.description}</p>
                         )}
                       </Td>
                       <Td>{product.unit}</Td>
-                      <Td align="right">{formatMoney(product.price, currency)}</Td>
-                      <Td align="right">{product.taxRate}%</Td>
+                      <Td align="right">
+                        <Amount>{formatMoney(product.price, currency)}</Amount>
+                      </Td>
+                      <Td align="right" className="tabular-nums">
+                        {product.taxRate}%
+                      </Td>
                       <Td align="right">
                         <div className="flex justify-end gap-1">
                           <Link href={`/products/${product.id}/edit`}>
@@ -153,16 +172,52 @@ export default function ProductsPage() {
                               Edit
                             </Button>
                           </Link>
-                          <Button variant="ghost" size="sm" onClick={() => setPendingDelete(product)}>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => setPendingDelete(product)}
+                            aria-label={`Delete ${product.name}`}
+                          >
                             Delete
                           </Button>
                         </div>
                       </Td>
-                    </tr>
+                    </Tr>
                   ))}
                 </tbody>
               </Table>
             </TableWrap>
+
+            <MobileList>
+              {result!.items.map((product) => (
+                <MobileRow key={product.id}>
+                  <p className="font-medium text-charcoal">{product.name}</p>
+                  {product.description && (
+                    <p className="mt-0.5 text-caption text-fog">{product.description}</p>
+                  )}
+                  <MobileFacts
+                    items={[
+                      {
+                        label: "Price",
+                        value: <Amount>{formatMoney(product.price, currency)}</Amount>,
+                      },
+                      { label: "Unit", value: product.unit },
+                      { label: "Tax", value: `${product.taxRate}%` },
+                    ]}
+                  />
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    <Link href={`/products/${product.id}/edit`}>
+                      <Button variant="secondary" size="sm">
+                        Edit
+                      </Button>
+                    </Link>
+                    <Button variant="ghost" size="sm" onClick={() => setPendingDelete(product)}>
+                      Delete
+                    </Button>
+                  </div>
+                </MobileRow>
+              ))}
+            </MobileList>
 
             <Pagination
               page={result!.page}
@@ -177,7 +232,8 @@ export default function ProductsPage() {
       <ConfirmDialog
         open={pendingDelete !== null}
         title="Delete item"
-        description={`Delete ${pendingDelete?.name}? Existing quotations keep their saved line items.`}
+        description={`${pendingDelete?.name} will be removed from your catalogue. Existing quotations and invoices keep their saved line items.`}
+        confirmLabel="Delete item"
         loading={deleting}
         onConfirm={confirmDelete}
         onCancel={() => setPendingDelete(null)}

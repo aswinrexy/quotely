@@ -23,7 +23,7 @@ export default function EditProductPage() {
 
   return (
     <>
-      <PageHeader title="Edit product or service" />
+      <PageHeader title="Edit item" />
       {error ? (
         <Card>
           <ErrorState message={error} />

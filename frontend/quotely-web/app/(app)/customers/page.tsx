@@ -3,13 +3,25 @@
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { api } from "@/lib/api";
+import { formatDate } from "@/lib/format";
 import { useToast } from "@/components/ui/toast";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { ConfirmDialog } from "@/components/ui/dialog";
-import { Input } from "@/components/ui/field";
-import { EmptyState, ErrorState, LoadingState } from "@/components/ui/states";
-import { Pagination, Table, TableWrap, Td, Th } from "@/components/ui/table";
+import { SearchInput } from "@/components/ui/field";
+import { EmptyState, ErrorState, TableSkeleton } from "@/components/ui/states";
+import { Icon } from "@/components/ui/icons";
+import {
+  MobileFacts,
+  MobileList,
+  MobileRow,
+  Pagination,
+  Table,
+  TableWrap,
+  Td,
+  Th,
+  Tr,
+} from "@/components/ui/table";
 import { PageHeader } from "@/components/app/page-header";
 import type { Customer, PagedResult } from "@/types";
 
@@ -42,7 +54,7 @@ export default function CustomersPage() {
       if (debounced) query.set("search", debounced);
       setResult(await api.get<PagedResult<Customer>>(`/api/customers?${query}`));
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not load customers.");
+      setError(err instanceof Error ? err.message : "We couldn't load your customers.");
     } finally {
       setLoading(false);
     }
@@ -57,7 +69,7 @@ export default function CustomersPage() {
     setDeleting(true);
     try {
       await api.delete(`/api/customers/${pendingDelete.id}`);
-      toast("Customer deleted.", "success");
+      toast("Customer deleted", "success");
       setPendingDelete(null);
       await load();
     } catch (err) {
@@ -73,27 +85,30 @@ export default function CustomersPage() {
     <>
       <PageHeader
         title="Customers"
-        description="People and companies you send quotations to."
+        description="Manage your customers and their quotation history."
         action={
           <Link href="/customers/new">
-            <Button>New customer</Button>
+            <Button>
+              <Icon.plus className="h-4 w-4" />
+              Add customer
+            </Button>
           </Link>
         }
       />
 
       <Card>
-        <div className="border-b border-slate-200 px-4 py-3">
-          <Input
+        <div className="border-b border-ash p-3">
+          <SearchInput
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search by name, company, email or phone"
+            placeholder="Search by name, company, email or phone…"
             aria-label="Search customers"
             className="sm:max-w-sm"
           />
         </div>
 
         {loading ? (
-          <LoadingState />
+          <TableSkeleton rows={6} columns={5} />
         ) : error ? (
           <ErrorState message={error} onRetry={load} />
         ) : isEmpty ? (
@@ -107,7 +122,7 @@ export default function CustomersPage() {
             action={
               !debounced && (
                 <Link href="/customers/new">
-                  <Button>New customer</Button>
+                  <Button>Add customer</Button>
                 </Link>
               )
             }
@@ -118,27 +133,29 @@ export default function CustomersPage() {
               <Table>
                 <thead>
                   <tr>
-                    <Th>Name</Th>
+                    <Th>Customer</Th>
                     <Th>Company</Th>
                     <Th>Email</Th>
                     <Th>Phone</Th>
+                    <Th>Added</Th>
                     <Th align="right">Actions</Th>
                   </tr>
                 </thead>
                 <tbody>
                   {result!.items.map((customer) => (
-                    <tr key={customer.id} className="hover:bg-slate-50">
+                    <Tr key={customer.id}>
                       <Td>
                         <Link
                           href={`/customers/${customer.id}`}
-                          className="font-medium text-blue-600 hover:underline"
+                          className="font-medium text-electric hover:underline"
                         >
                           {customer.name}
                         </Link>
                       </Td>
                       <Td>{customer.companyName || "—"}</Td>
-                      <Td>{customer.email || "—"}</Td>
+                      <Td className="break-all">{customer.email || "—"}</Td>
                       <Td>{customer.phone || "—"}</Td>
+                      <Td>{formatDate(customer.createdAt)}</Td>
                       <Td align="right">
                         <div className="flex justify-end gap-1">
                           <Link href={`/customers/${customer.id}/edit`}>
@@ -146,16 +163,52 @@ export default function CustomersPage() {
                               Edit
                             </Button>
                           </Link>
-                          <Button variant="ghost" size="sm" onClick={() => setPendingDelete(customer)}>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => setPendingDelete(customer)}
+                            aria-label={`Delete ${customer.name}`}
+                          >
                             Delete
                           </Button>
                         </div>
                       </Td>
-                    </tr>
+                    </Tr>
                   ))}
                 </tbody>
               </Table>
             </TableWrap>
+
+            <MobileList>
+              {result!.items.map((customer) => (
+                <MobileRow key={customer.id}>
+                  <Link
+                    href={`/customers/${customer.id}`}
+                    className="font-medium text-electric hover:underline"
+                  >
+                    {customer.name}
+                  </Link>
+                  <MobileFacts
+                    items={[
+                      { label: "Company", value: customer.companyName || "—" },
+                      { label: "Phone", value: customer.phone || "—" },
+                      { label: "Email", value: customer.email || "—" },
+                      { label: "Added", value: formatDate(customer.createdAt) },
+                    ]}
+                  />
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    <Link href={`/customers/${customer.id}/edit`}>
+                      <Button variant="secondary" size="sm">
+                        Edit
+                      </Button>
+                    </Link>
+                    <Button variant="ghost" size="sm" onClick={() => setPendingDelete(customer)}>
+                      Delete
+                    </Button>
+                  </div>
+                </MobileRow>
+              ))}
+            </MobileList>
 
             <Pagination
               page={result!.page}
@@ -170,7 +223,8 @@ export default function CustomersPage() {
       <ConfirmDialog
         open={pendingDelete !== null}
         title="Delete customer"
-        description={`Delete ${pendingDelete?.name}? This cannot be undone.`}
+        description={`${pendingDelete?.name} will be permanently deleted. This cannot be undone.`}
+        confirmLabel="Delete customer"
         loading={deleting}
         onConfirm={confirmDelete}
         onCancel={() => setPendingDelete(null)}

@@ -6,15 +6,17 @@ type Variant = "primary" | "secondary" | "ghost" | "danger";
 type Size = "sm" | "md";
 
 const VARIANTS: Record<Variant, string> = {
-  primary: "bg-blue-600 text-white hover:bg-blue-700 focus-visible:outline-blue-600",
-  secondary: "border border-slate-300 bg-white text-slate-800 hover:bg-slate-50 focus-visible:outline-slate-400",
-  ghost: "text-slate-600 hover:bg-slate-100 hover:text-slate-900 focus-visible:outline-slate-400",
-  danger: "bg-red-600 text-white hover:bg-red-700 focus-visible:outline-red-600",
+  // The committed action: near-black fill, one per surface. Blue is a highlight, not a button.
+  primary: "bg-midnight text-canvas shadow-subtle hover:bg-charcoal",
+  secondary: "border border-ash bg-canvas text-charcoal hover:bg-paper",
+  ghost: "text-steel hover:bg-paper hover:text-charcoal",
+  // Restrained until the user commits; the confirmation dialog carries the red.
+  danger: "border border-ash bg-canvas text-rose-ink hover:border-rose-ink/30 hover:bg-rose-wash/50",
 };
 
 const SIZES: Record<Size, string> = {
-  sm: "h-8 px-3 text-xs",
-  md: "h-10 px-4 text-sm",
+  sm: "h-8 gap-1.5 px-3 text-caption",
+  md: "h-9 gap-2 px-3.5 text-body",
 };
 
 interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
@@ -37,9 +39,9 @@ export function Button({
       {...props}
       disabled={disabled || loading}
       className={cn(
-        "inline-flex items-center justify-center gap-2 rounded-lg font-medium transition-colors",
-        "focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2",
-        "disabled:cursor-not-allowed disabled:opacity-60",
+        "inline-flex shrink-0 items-center justify-center rounded-btn font-medium",
+        "transition-colors duration-150 ease-out",
+        "disabled:cursor-not-allowed disabled:opacity-50",
         VARIANTS[variant],
         SIZES[size],
         className,

@@ -8,9 +8,21 @@ import { formatDate, formatMoney } from "@/lib/format";
 import { Button } from "@/components/ui/button";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
 import { StatusBadge } from "@/components/ui/badge";
-import { EmptyState, ErrorState, LoadingState } from "@/components/ui/states";
-import { Table, TableWrap, Td, Th } from "@/components/ui/table";
+import { DetailSkeleton, EmptyState, ErrorState } from "@/components/ui/states";
+import {
+  Amount,
+  MobileFacts,
+  MobileList,
+  MobileRow,
+  Mono,
+  Table,
+  TableWrap,
+  Td,
+  Th,
+  Tr,
+} from "@/components/ui/table";
 import { PageHeader } from "@/components/app/page-header";
+import { Icon } from "@/components/ui/icons";
 import type { Customer, PagedResult, QuotationListItem } from "@/types";
 
 export default function CustomerDetailPage() {
@@ -44,7 +56,7 @@ export default function CustomerDetailPage() {
   if (loading) {
     return (
       <Card>
-        <LoadingState />
+        <DetailSkeleton />
       </Card>
     );
   }
@@ -69,40 +81,45 @@ export default function CustomerDetailPage() {
 
   return (
     <>
+      <Link
+        href="/customers"
+        className="mb-2 inline-flex items-center gap-1 text-body text-fog transition-colors duration-150 ease-out hover:text-charcoal"
+      >
+        <Icon.chevronLeft className="h-3.5 w-3.5" />
+        Customers
+      </Link>
+
       <PageHeader
         title={customer.name}
         description={customer.companyName ?? undefined}
         action={
           <>
-            <Link href="/customers">
-              <Button variant="secondary">Back</Button>
-            </Link>
             <Link href={`/customers/${customer.id}/edit`}>
               <Button variant="secondary">Edit</Button>
             </Link>
             <Link href={`/quotations/new?customerId=${customer.id}`}>
-              <Button>Create Quotation</Button>
+              <Button>New quotation</Button>
             </Link>
           </>
         }
       />
 
-      <div className="grid gap-6 lg:grid-cols-3">
+      <div className="grid gap-4 lg:grid-cols-3">
         <Card className="lg:col-span-1">
           <CardHeader title="Details" />
           <CardBody>
             <dl className="space-y-3">
               {details.map(([label, value]) => (
                 <div key={label}>
-                  <dt className="text-xs font-medium uppercase tracking-wide text-slate-500">{label}</dt>
-                  <dd className="mt-0.5 text-sm text-slate-800">{value}</dd>
+                  <dt className="text-caption font-medium uppercase tracking-wide text-fog">{label}</dt>
+                  <dd className="mt-0.5 text-body text-charcoal">{value}</dd>
                 </div>
               ))}
             </dl>
             {customer.notes && (
-              <div className="mt-4 rounded-lg bg-slate-50 p-3">
-                <p className="text-xs font-medium uppercase tracking-wide text-slate-500">Notes</p>
-                <p className="mt-1 whitespace-pre-line text-sm text-slate-700">{customer.notes}</p>
+              <div className="mt-4 rounded-card bg-paper p-3">
+                <p className="text-caption font-medium uppercase tracking-wide text-fog">Notes</p>
+                <p className="mt-1 whitespace-pre-line text-body text-steel">{customer.notes}</p>
               </div>
             )}
           </CardBody>
@@ -116,7 +133,7 @@ export default function CustomerDetailPage() {
               description="Create a quotation for this customer to get started."
               action={
                 <Link href={`/quotations/new?customerId=${customer.id}`}>
-                  <Button>Create Quotation</Button>
+                  <Button>New quotation</Button>
                 </Link>
               }
             />
@@ -133,27 +150,54 @@ export default function CustomerDetailPage() {
                 </thead>
                 <tbody>
                   {quotations.map((quotation) => (
-                    <tr key={quotation.id} className="hover:bg-slate-50">
+                    <Tr key={quotation.id}>
                       <Td>
                         <Link
                           href={`/quotations/${quotation.id}`}
-                          className="font-medium text-blue-600 hover:underline"
+                          className="font-medium text-electric hover:underline"
                         >
-                          {quotation.quotationNumber}
+                          <Mono>{quotation.quotationNumber}</Mono>
                         </Link>
                       </Td>
                       <Td>{formatDate(quotation.quotationDate)}</Td>
                       <Td>
                         <StatusBadge status={quotation.status} />
                       </Td>
-                      <Td align="right" className="font-medium text-slate-900">
-                        {formatMoney(quotation.grandTotal, quotation.currency)}
+                      <Td align="right">
+                        <Amount>{formatMoney(quotation.grandTotal, quotation.currency)}</Amount>
                       </Td>
-                    </tr>
+                    </Tr>
                   ))}
                 </tbody>
               </Table>
             </TableWrap>
+          )}
+
+          {quotations.length > 0 && (
+            <MobileList>
+              {quotations.map((quotation) => (
+                <MobileRow key={quotation.id}>
+                  <div className="flex items-start justify-between gap-3">
+                    <Link
+                      href={`/quotations/${quotation.id}`}
+                      className="font-medium text-electric hover:underline"
+                    >
+                      <Mono>{quotation.quotationNumber}</Mono>
+                    </Link>
+                    <StatusBadge status={quotation.status} />
+                  </div>
+                  <MobileFacts
+                    items={[
+                      { label: "Date", value: formatDate(quotation.quotationDate) },
+                      {
+                        label: "Total",
+                        value: <Amount>{formatMoney(quotation.grandTotal, quotation.currency)}</Amount>,
+                      },
+                    ]}
+                  />
+                </MobileRow>
+              ))}
+            </MobileList>
           )}
         </Card>
       </div>

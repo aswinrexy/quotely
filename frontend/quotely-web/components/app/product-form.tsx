@@ -82,7 +82,7 @@ export function ProductForm({ product }: { product?: Product }) {
   }
 
   return (
-    <Card>
+    <Card className="max-w-3xl">
       <form onSubmit={onSubmit} noValidate>
         <CardHeader title={product ? "Edit product or service" : "New product or service"} />
         <CardBody className="space-y-5">
@@ -144,11 +144,11 @@ export function ProductForm({ product }: { product?: Product }) {
           </div>
         </CardBody>
 
-        <div className="flex justify-end gap-2 border-t border-slate-200 px-5 py-4">
-          <Button type="button" variant="secondary" onClick={() => router.push("/products")}>
+        <div className="flex flex-col-reverse gap-2 border-t border-ash px-4 py-3 sm:flex-row sm:justify-end">
+          <Button type="button" variant="secondary" onClick={() => router.push("/products")} className="w-full sm:w-auto">
             Cancel
           </Button>
-          <Button type="submit" loading={saving}>
+          <Button type="submit" loading={saving} className="w-full sm:w-auto">
             {product ? "Save changes" : "Create"}
           </Button>
         </div>

@@ -2,6 +2,7 @@
 
 import { createContext, useCallback, useContext, useMemo, useState } from "react";
 import { cn } from "@/lib/cn";
+import { Icon } from "@/components/ui/icons";
 
 type ToastVariant = "success" | "error" | "info";
 
@@ -31,19 +32,24 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
   return (
     <ToastContext.Provider value={value}>
       {children}
-      <div className="pointer-events-none fixed bottom-4 right-4 z-100 flex w-full max-w-sm flex-col gap-2 px-4 sm:px-0">
+      <div
+        role="region"
+        aria-label="Notifications"
+        className="pointer-events-none fixed bottom-4 left-1/2 z-100 flex w-full max-w-sm -translate-x-1/2 flex-col gap-2 px-4 sm:left-auto sm:right-4 sm:translate-x-0 sm:px-0"
+      >
         {toasts.map((item) => (
           <div
             key={item.id}
             role="status"
             className={cn(
-              "pointer-events-auto rounded-lg border px-4 py-3 text-sm shadow-lg",
-              item.variant === "success" && "border-emerald-200 bg-emerald-50 text-emerald-900",
-              item.variant === "error" && "border-red-200 bg-red-50 text-red-900",
-              item.variant === "info" && "border-slate-200 bg-white text-slate-900",
+              // Compact, border-defined, one small accent glyph — not a banner.
+              "pointer-events-auto flex items-center gap-2.5 rounded-btn border border-ash bg-canvas",
+              "px-3.5 py-2.5 text-body text-charcoal shadow-pop",
             )}
           >
-            {item.message}
+            {item.variant === "success" && <Icon.check className="h-4 w-4 shrink-0 text-green" />}
+            {item.variant === "error" && <Icon.alert className="h-4 w-4 shrink-0 text-rose-ink" />}
+            <span className="min-w-0">{item.message}</span>
           </div>
         ))}
       </div>

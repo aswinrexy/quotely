@@ -238,9 +238,9 @@ export default function EditInvoicePage() {
           {items.map((item, index) => {
             const line = calculateLine(item);
             return (
-              <div key={item.key} className="rounded-lg border border-slate-200 p-4">
+              <div key={item.key} className="rounded-btn border border-ash p-4">
                 <div className="mb-3 flex items-center justify-between">
-                  <p className="text-sm font-medium text-slate-700">Item {index + 1}</p>
+                  <p className="text-body font-medium text-steel">Item {index + 1}</p>
                   {invoice.canEditItems && items.length > 1 && (
                     <Button
                       type="button"
@@ -326,9 +326,9 @@ export default function EditInvoicePage() {
                   </Field>
                 </div>
 
-                <p className="mt-3 text-right text-sm text-slate-600">
+                <p className="mt-3 text-right text-body text-steel">
                   Line total:{" "}
-                  <span className="font-medium text-slate-900">
+                  <span className="font-medium text-charcoal">
                     {formatMoney(line.lineTotal, invoice.currency)}
                   </span>
                 </p>
@@ -352,26 +352,26 @@ export default function EditInvoicePage() {
 
       <Card>
         <CardBody className="flex justify-end">
-          <dl className="w-full max-w-xs space-y-2 text-sm">
+          <dl className="w-full max-w-xs space-y-2 text-body">
             <div className="flex justify-between">
-              <dt className="text-slate-500">Subtotal</dt>
-              <dd className="text-slate-900">{formatMoney(totals.subtotal, invoice.currency)}</dd>
+              <dt className="text-fog">Subtotal</dt>
+              <dd className="text-charcoal">{formatMoney(totals.subtotal, invoice.currency)}</dd>
             </div>
             <div className="flex justify-between">
-              <dt className="text-slate-500">Discount</dt>
-              <dd className="text-slate-900">-{formatMoney(totals.discountTotal, invoice.currency)}</dd>
+              <dt className="text-fog">Discount</dt>
+              <dd className="text-charcoal">-{formatMoney(totals.discountTotal, invoice.currency)}</dd>
             </div>
             <div className="flex justify-between">
-              <dt className="text-slate-500">Tax</dt>
-              <dd className="text-slate-900">{formatMoney(totals.taxTotal, invoice.currency)}</dd>
+              <dt className="text-fog">Tax</dt>
+              <dd className="text-charcoal">{formatMoney(totals.taxTotal, invoice.currency)}</dd>
             </div>
-            <div className="mt-2 flex items-center justify-between rounded-lg bg-teal-50 px-3 py-3">
-              <dt className="text-sm font-semibold text-teal-700">TOTAL DUE</dt>
-              <dd className="text-lg font-bold text-teal-700">
+            <div className="mt-2 flex items-center justify-between border-t border-smoke pt-3">
+              <dt className="text-body font-semibold text-charcoal">Total</dt>
+              <dd className="text-body-xl font-semibold tabular-nums text-charcoal">
                 {formatMoney(totals.grandTotal, invoice.currency)}
               </dd>
             </div>
-            <p className="text-xs text-slate-400">Preview only — the server recalculates on save.</p>
+            <p className="text-caption text-fog">Preview only — the server recalculates on save.</p>
           </dl>
         </CardBody>
       </Card>

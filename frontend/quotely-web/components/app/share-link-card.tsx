@@ -6,6 +6,7 @@ import { formatDate } from "@/lib/format";
 import { useToast } from "@/components/ui/toast";
 import { Button } from "@/components/ui/button";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
+import { Icon } from "@/components/ui/icons";
 import { ConfirmDialog } from "@/components/ui/dialog";
 import type { PublicQuotationLink, Quotation } from "@/types";
 
@@ -62,79 +63,105 @@ export function ShareLinkCard({
       <Card>
         <CardHeader
           title="Share with customer"
-          description="Your customer can open this link to review the quotation and accept or reject it. No account needed."
+          description={
+            quotation.respondedAt
+              ? "The customer has answered through this link."
+              : "A link your customer opens to review and respond. No account needed."
+          }
         />
-        <CardBody className="space-y-4">
+        <CardBody className="space-y-3">
+          {quotation.respondedAt && (
+            <dl className="space-y-2 rounded-card bg-paper p-3">
+              <div>
+                <dt className="text-caption font-medium uppercase tracking-wide text-fog">
+                  {quotation.status === "Accepted" ? "Accepted by" : "Rejected by"}
+                </dt>
+                <dd className="mt-0.5 text-body text-charcoal">
+                  {quotation.respondedByName ?? "—"}
+                  {quotation.respondedByEmail ? ` · ${quotation.respondedByEmail}` : ""}
+                </dd>
+              </div>
+              <div>
+                <dt className="text-caption font-medium uppercase tracking-wide text-fog">On</dt>
+                <dd className="mt-0.5 text-body text-charcoal">{formatDate(quotation.respondedAt)}</dd>
+              </div>
+              {quotation.responseComment && (
+                <div>
+                  <dt className="text-caption font-medium uppercase tracking-wide text-fog">Comment</dt>
+                  <dd className="mt-0.5 whitespace-pre-line text-body text-steel">
+                    {quotation.responseComment}
+                  </dd>
+                </div>
+              )}
+            </dl>
+          )}
+
           {url ? (
             <>
-              <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
-                <p className="break-all font-mono text-xs text-slate-700">{url}</p>
+              <div className="rounded-input border border-ash bg-paper p-2.5">
+                <p className="break-all font-mono text-caption text-charcoal">{url}</p>
               </div>
-              <div className="flex flex-wrap gap-2">
-                <Button onClick={copy}>Copy link</Button>
-                <a href={url} target="_blank" rel="noopener noreferrer">
-                  <Button variant="secondary">Open customer view</Button>
-                </a>
-                <Button variant="ghost" onClick={() => setConfirmReplace(true)}>
-                  Replace link
-                </Button>
-              </div>
-              <p className="text-xs text-slate-500">
-                Copy this link now — for security only a hashed copy is stored, so it cannot be shown again.
-                You can always create a replacement.
+              <p className="text-caption text-fog">
+                Copy it now — this link is shown once and cannot be displayed again.
               </p>
+              <div className="flex flex-wrap gap-2">
+                <Button size="sm" onClick={copy}>
+                  <Icon.copy className="h-3.5 w-3.5" />
+                  Copy link
+                </Button>
+                <a href={url} target="_blank" rel="noopener noreferrer">
+                  <Button variant="secondary" size="sm">
+                    <Icon.external className="h-3.5 w-3.5" />
+                    Open
+                  </Button>
+                </a>
+              </div>
             </>
           ) : hasExistingLink ? (
             <>
-              <p className="text-sm text-slate-600">
-                A share link is active
-                {quotation.publicLinkCreatedAt ? ` since ${formatDate(quotation.publicLinkCreatedAt)}` : ""}. The URL
-                itself is not stored, so it cannot be displayed again.
+              <div className="flex items-center gap-2 text-body text-charcoal">
+                <Icon.link className="h-4 w-4 shrink-0 text-electric" />
+                <span>
+                  Link active
+                  {quotation.publicLinkCreatedAt
+                    ? ` since ${formatDate(quotation.publicLinkCreatedAt)}`
+                    : ""}
+                </span>
+              </div>
+              <p className="text-caption text-fog">
+                Only a hash of the link is stored, so the URL cannot be shown again. Creating a new
+                one immediately stops the old link from working.
               </p>
-              <Button variant="secondary" onClick={() => setConfirmReplace(true)}>
-                Create a new link
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => setConfirmReplace(true)}
+                loading={generating}
+              >
+                Replace link
               </Button>
-              <p className="text-xs text-slate-500">Creating a new link stops the previous one from working.</p>
             </>
           ) : (
             <>
-              <Button onClick={generate} loading={generating}>
+              <p className="text-body text-fog">
+                Anyone with the link can view this quotation and respond, so share it only with
+                your customer.
+              </p>
+              <Button size="sm" onClick={generate} loading={generating}>
+                <Icon.link className="h-3.5 w-3.5" />
                 Generate share link
               </Button>
-              <p className="text-xs text-slate-500">
-                Anyone with the link can view this quotation and respond, so share it only with your customer.
-              </p>
             </>
-          )}
-
-          {quotation.respondedAt && (
-            <div
-              className={`rounded-lg border px-3 py-3 text-sm ${
-                quotation.status === "Accepted"
-                  ? "border-emerald-200 bg-emerald-50 text-emerald-900"
-                  : "border-red-200 bg-red-50 text-red-900"
-              }`}
-            >
-              <p className="font-medium">
-                {quotation.status === "Accepted" ? "Accepted" : "Rejected"} by{" "}
-                {quotation.respondedByName ?? "the customer"} on {formatDate(quotation.respondedAt)}
-              </p>
-              {quotation.respondedByEmail && (
-                <p className="mt-0.5 break-words text-xs opacity-80">{quotation.respondedByEmail}</p>
-              )}
-              {quotation.responseComment && (
-                <p className="mt-2 whitespace-pre-line text-sm opacity-90">“{quotation.responseComment}”</p>
-              )}
-            </div>
           )}
         </CardBody>
       </Card>
 
       <ConfirmDialog
         open={confirmReplace}
-        title="Create a new share link?"
-        description="The link you shared before will stop working immediately. Anyone using it will see a 'not found' page."
-        confirmLabel="Create new link"
+        title="Replace share link"
+        description="The link you shared previously will stop working immediately, and the new URL is shown only once. Continue?"
+        confirmLabel="Replace link"
+        tone="primary"
         loading={generating}
         onConfirm={generate}
         onCancel={() => setConfirmReplace(false)}

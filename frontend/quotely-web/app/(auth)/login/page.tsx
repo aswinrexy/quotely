@@ -35,8 +35,8 @@ export default function LoginPage() {
 
   return (
     <div>
-      <h1 className="text-lg font-semibold text-slate-900">Sign in</h1>
-      <p className="mt-1 text-sm text-slate-500">Welcome back. Enter your details to continue.</p>
+      <h1 className="font-display text-subheading text-charcoal">Sign in</h1>
+      <p className="mt-1 text-body text-fog">Welcome back. Enter your details to continue.</p>
 
       <form onSubmit={onSubmit} className="mt-6 space-y-4" noValidate>
         <Field label="Email" htmlFor="email" required>
@@ -64,7 +64,7 @@ export default function LoginPage() {
         </Field>
 
         {error && (
-          <p role="alert" className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">
+          <p role="alert" className="rounded-btn border border-ash bg-rose-wash px-3 py-2 text-body text-rose-ink">
             {error}
           </p>
         )}
@@ -74,9 +74,9 @@ export default function LoginPage() {
         </Button>
       </form>
 
-      <p className="mt-5 text-center text-sm text-slate-500">
+      <p className="mt-5 text-center text-body text-fog">
         New to Quotely?{" "}
-        <Link href="/register" className="font-medium text-blue-600 hover:underline">
+        <Link href="/register" className="font-medium text-electric hover:underline">
           Create an account
         </Link>
       </p>

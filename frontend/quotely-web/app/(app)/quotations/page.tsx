@@ -2,16 +2,30 @@
 
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { api, saveBlob } from "@/lib/api";
 import { formatDate, formatMoney } from "@/lib/format";
 import { useToast } from "@/components/ui/toast";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { ConfirmDialog } from "@/components/ui/dialog";
-import { Input, Select } from "@/components/ui/field";
+import { FilterSelect, SearchInput } from "@/components/ui/field";
 import { StatusBadge } from "@/components/ui/badge";
-import { EmptyState, ErrorState, LoadingState } from "@/components/ui/states";
-import { Pagination, Table, TableWrap, Td, Th } from "@/components/ui/table";
+import { EmptyState, ErrorState, TableSkeleton } from "@/components/ui/states";
+import { Icon } from "@/components/ui/icons";
+import {
+  Amount,
+  MobileFacts,
+  MobileList,
+  MobileRow,
+  Mono,
+  Pagination,
+  Table,
+  TableWrap,
+  Td,
+  Th,
+  Tr,
+} from "@/components/ui/table";
 import { PageHeader } from "@/components/app/page-header";
 import { QUOTATION_STATUSES, type PagedResult, type QuotationListItem } from "@/types";
 
@@ -19,9 +33,10 @@ const PAGE_SIZE = 10;
 
 export default function QuotationsPage() {
   const toast = useToast();
+  const params = useSearchParams();
   const [search, setSearch] = useState("");
   const [debounced, setDebounced] = useState("");
-  const [status, setStatus] = useState("");
+  const [status, setStatus] = useState(params.get("status") ?? "");
   const [page, setPage] = useState(1);
   const [result, setResult] = useState<PagedResult<QuotationListItem> | null>(null);
   const [loading, setLoading] = useState(true);
@@ -47,7 +62,7 @@ export default function QuotationsPage() {
       if (status) query.set("status", status);
       setResult(await api.get<PagedResult<QuotationListItem>>(`/api/quotations?${query}`));
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not load quotations.");
+      setError(err instanceof Error ? err.message : "Could not load your quotations.");
     } finally {
       setLoading(false);
     }
@@ -62,7 +77,7 @@ export default function QuotationsPage() {
     try {
       const { blob, fileName } = await api.downloadPdf(quotation.id);
       saveBlob(blob, fileName);
-      toast("PDF downloaded.", "success");
+      toast("PDF downloaded", "success");
     } catch (err) {
       toast(err instanceof Error ? err.message : "Could not generate the PDF.", "error");
     } finally {
@@ -75,7 +90,7 @@ export default function QuotationsPage() {
     setDeleting(true);
     try {
       await api.delete(`/api/quotations/${pendingDelete.id}`);
-      toast("Quotation deleted.", "success");
+      toast("Quotation deleted", "success");
       setPendingDelete(null);
       await load();
     } catch (err) {
@@ -92,31 +107,33 @@ export default function QuotationsPage() {
     <>
       <PageHeader
         title="Quotations"
-        description="Every quotation you have raised."
+        description="Create and manage customer quotations."
         action={
           <Link href="/quotations/new">
-            <Button>Create Quotation</Button>
+            <Button>
+              <Icon.plus className="h-4 w-4" />
+              New quotation
+            </Button>
           </Link>
         }
       />
 
       <Card>
-        <div className="flex flex-wrap gap-3 border-b border-slate-200 px-4 py-3">
-          <Input
+        <div className="flex flex-wrap gap-2 border-b border-ash p-3">
+          <SearchInput
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search by number or customer"
+            placeholder="Search quotations…"
             aria-label="Search quotations"
-            className="sm:max-w-xs"
+            className="min-w-0 flex-1 sm:max-w-xs"
           />
-          <Select
+          <FilterSelect
             value={status}
             onChange={(e) => {
               setStatus(e.target.value);
               setPage(1);
             }}
             aria-label="Filter by status"
-            className="sm:max-w-40"
           >
             <option value="">All statuses</option>
             {QUOTATION_STATUSES.map((value) => (
@@ -124,11 +141,11 @@ export default function QuotationsPage() {
                 {value}
               </option>
             ))}
-          </Select>
+          </FilterSelect>
         </div>
 
         {loading ? (
-          <LoadingState />
+          <TableSkeleton rows={6} columns={6} />
         ) : error ? (
           <ErrorState message={error} onRetry={load} />
         ) : isEmpty ? (
@@ -136,13 +153,13 @@ export default function QuotationsPage() {
             title={filtered ? "No matching quotations" : "No quotations yet"}
             description={
               filtered
-                ? "Try a different search or status filter."
-                : "Create your first quotation and download it as a professional PDF."
+                ? "Try a different search term or status filter."
+                : "Create your first quotation and send it to a customer in a few clicks."
             }
             action={
               !filtered && (
                 <Link href="/quotations/new">
-                  <Button>Create Quotation</Button>
+                  <Button>Create quotation</Button>
                 </Link>
               )
             }
@@ -153,37 +170,34 @@ export default function QuotationsPage() {
               <Table>
                 <thead>
                   <tr>
-                    <Th>Number</Th>
+                    <Th>Quotation</Th>
                     <Th>Customer</Th>
                     <Th>Date</Th>
                     <Th>Valid until</Th>
                     <Th>Status</Th>
-                    <Th align="right">Total</Th>
+                    <Th align="right">Amount</Th>
                     <Th align="right">Actions</Th>
                   </tr>
                 </thead>
                 <tbody>
                   {result!.items.map((quotation) => (
-                    <tr key={quotation.id} className="hover:bg-slate-50">
+                    <Tr key={quotation.id}>
                       <Td>
                         <Link
                           href={`/quotations/${quotation.id}`}
-                          className="font-medium text-blue-600 hover:underline"
+                          className="font-medium text-electric hover:underline"
                         >
-                          {quotation.quotationNumber}
+                          <Mono>{quotation.quotationNumber}</Mono>
                         </Link>
                       </Td>
-                      <Td>{quotation.customerName}</Td>
+                      <Td className="text-charcoal">{quotation.customerName}</Td>
                       <Td>{formatDate(quotation.quotationDate)}</Td>
                       <Td>{formatDate(quotation.validUntil)}</Td>
                       <Td>
                         <StatusBadge status={quotation.status} />
-                        {quotation.respondedAt && (
-                          <p className="mt-1 text-xs text-slate-500">{formatDate(quotation.respondedAt)}</p>
-                        )}
                       </Td>
-                      <Td align="right" className="font-medium text-slate-900">
-                        {formatMoney(quotation.grandTotal, quotation.currency)}
+                      <Td align="right">
+                        <Amount>{formatMoney(quotation.grandTotal, quotation.currency)}</Amount>
                       </Td>
                       <Td align="right">
                         <div className="flex justify-end gap-1">
@@ -192,6 +206,7 @@ export default function QuotationsPage() {
                             size="sm"
                             loading={downloading === quotation.id}
                             onClick={() => download(quotation)}
+                            aria-label={`Download ${quotation.quotationNumber} as PDF`}
                           >
                             PDF
                           </Button>
@@ -200,16 +215,67 @@ export default function QuotationsPage() {
                               Edit
                             </Button>
                           </Link>
-                          <Button variant="ghost" size="sm" onClick={() => setPendingDelete(quotation)}>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => setPendingDelete(quotation)}
+                            aria-label={`Delete ${quotation.quotationNumber}`}
+                          >
                             Delete
                           </Button>
                         </div>
                       </Td>
-                    </tr>
+                    </Tr>
                   ))}
                 </tbody>
               </Table>
             </TableWrap>
+
+            <MobileList>
+              {result!.items.map((quotation) => (
+                <MobileRow key={quotation.id}>
+                  <div className="flex items-start justify-between gap-3">
+                    <Link
+                      href={`/quotations/${quotation.id}`}
+                      className="font-medium text-electric hover:underline"
+                    >
+                      <Mono>{quotation.quotationNumber}</Mono>
+                    </Link>
+                    <StatusBadge status={quotation.status} />
+                  </div>
+                  <MobileFacts
+                    items={[
+                      { label: "Customer", value: quotation.customerName },
+                      {
+                        label: "Amount",
+                        value: <Amount>{formatMoney(quotation.grandTotal, quotation.currency)}</Amount>,
+                      },
+                      { label: "Date", value: formatDate(quotation.quotationDate) },
+                      { label: "Valid until", value: formatDate(quotation.validUntil) },
+                    ]}
+                  />
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      loading={downloading === quotation.id}
+                      onClick={() => download(quotation)}
+                    >
+                      <Icon.download className="h-3.5 w-3.5" />
+                      PDF
+                    </Button>
+                    <Link href={`/quotations/${quotation.id}/edit`}>
+                      <Button variant="secondary" size="sm">
+                        Edit
+                      </Button>
+                    </Link>
+                    <Button variant="ghost" size="sm" onClick={() => setPendingDelete(quotation)}>
+                      Delete
+                    </Button>
+                  </div>
+                </MobileRow>
+              ))}
+            </MobileList>
 
             <Pagination
               page={result!.page}
@@ -224,7 +290,8 @@ export default function QuotationsPage() {
       <ConfirmDialog
         open={pendingDelete !== null}
         title="Delete quotation"
-        description={`Delete ${pendingDelete?.quotationNumber}? This cannot be undone.`}
+        description={`${pendingDelete?.quotationNumber} will be permanently deleted. This cannot be undone.`}
+        confirmLabel="Delete quotation"
         loading={deleting}
         onConfirm={confirmDelete}
         onCancel={() => setPendingDelete(null)}

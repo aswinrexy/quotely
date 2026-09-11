@@ -1,7 +1,79 @@
 @import "tailwindcss";
 
-@theme inline {
-  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+/*
+ * Quotely design tokens.
+ *
+ * Border-first: containers are defined by a 1px --color-ash edge, not by elevation.
+ * The palette is ~95% neutral; Electric Blue marks active state, links and key metrics,
+ * and the primary filled action is near-black rather than blue.
+ */
+@theme {
+  /* ---- canvas & structure ---- */
+  --color-canvas: #ffffff;
+  --color-paper: #f5f5f5;
+  --color-ash: #e5e5e5;
+  --color-smoke: #d4d4d4;
+  --color-pebble: #c8c8c8;
+
+  /* ---- ink ---- */
+  --color-midnight: #0a0a0a;
+  --color-charcoal: #171717;
+  --color-graphite: #262626;
+  --color-slate-ink: #404040;
+  --color-steel: #525252;
+  --color-fog: #737373;
+  --color-silver: #a3a3a3;
+
+  /* ---- accent ---- */
+  --color-electric: #2563eb;
+  --color-sapphire: #1e40af;
+  --color-blue-wash: #dbeaff;
+
+  /* ---- semantic accents (small surfaces only) ---- */
+  --color-mint: #dcfce7;
+  --color-green: #16a34a;
+  /* Darker green for text on a mint pill — #16a34a on #dcfce7 does not reach 4.5:1. */
+  --color-green-ink: #15803d;
+  --color-tangerine: #ea580c;
+  --color-lavender: #7c3aed;
+  --color-amber-wash: #fef3c7;
+  --color-amber-ink: #b45309;
+  --color-rose-wash: #fee2e2;
+  --color-rose-ink: #b91c1c;
+
+  /* ---- type ---- */
+  --font-sans: var(--font-inter), ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+
+  --text-caption: 11px;
+  --text-caption--line-height: 1.5;
+  --text-body: 14px;
+  --text-body--line-height: 1.43;
+  --text-body-lg: 16px;
+  --text-body-lg--line-height: 1.5;
+  --text-body-xl: 18px;
+  --text-body-xl--line-height: 1.56;
+  --text-subheading: 20px;
+  --text-subheading--line-height: 1.4;
+  --text-heading-sm: 24px;
+  --text-heading-sm--line-height: 1.33;
+  --text-heading: 30px;
+  --text-heading--line-height: 1.38;
+  --text-heading-lg: 36px;
+  --text-heading-lg--line-height: 1.11;
+  --text-display: 48px;
+  --text-display--line-height: 1;
+
+  /* ---- radius vocabulary: nothing outside these five ---- */
+  --radius-input: 6px;
+  --radius-btn: 8px;
+  --radius-card: 12px;
+  --radius-lgcard: 16px;
+
+  /* ---- elevation, used only for things that genuinely float ---- */
+  --shadow-subtle: rgba(0, 0, 0, 0.05) 0px 1px 2px 0px;
+  --shadow-pop: rgba(0, 0, 0, 0.1) 0px 4px 6px -1px, rgba(0, 0, 0, 0.1) 0px 2px 4px -2px;
+  --shadow-overlay: rgba(0, 0, 0, 0.1) 0px 10px 15px -3px, rgba(0, 0, 0, 0.1) 0px 4px 6px -4px;
 }
 
 html {
@@ -9,8 +81,38 @@ html {
 }
 
 body {
-  background-color: #f8fafc;
-  color: #0f172a;
+  background-color: var(--color-canvas);
+  color: var(--color-charcoal);
   font-family: var(--font-sans);
+  font-size: var(--text-body);
+  line-height: var(--text-body--line-height);
   -webkit-font-smoothing: antialiased;
+}
+
+/*
+ * Display headings. The reference calls for Satoshi at 36–48px weight 500; Satoshi is not
+ * served by Google Fonts, so this is its documented substitute — Inter 500 tightened by
+ * -0.02em, which reproduces the geometric, editorial feel at display sizes.
+ */
+.font-display {
+  font-family: var(--font-sans);
+  font-weight: 500;
+  letter-spacing: -0.02em;
+}
+
+/* One focus treatment everywhere: a thin blue ring, not a glow. */
+:where(a, button, input, select, textarea, [tabindex]):focus-visible {
+  outline: 2px solid var(--color-electric);
+  outline-offset: 2px;
+  border-radius: var(--radius-input);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
 }

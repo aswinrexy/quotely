@@ -80,7 +80,7 @@ export function CustomerForm({ customer }: { customer?: Customer }) {
   }
 
   return (
-    <Card>
+    <Card className="max-w-3xl">
       <form onSubmit={onSubmit} noValidate>
         <CardHeader title={customer ? "Edit customer" : "New customer"} />
         <CardBody className="space-y-5">
@@ -157,11 +157,11 @@ export function CustomerForm({ customer }: { customer?: Customer }) {
           </Field>
         </CardBody>
 
-        <div className="flex justify-end gap-2 border-t border-slate-200 px-5 py-4">
-          <Button type="button" variant="secondary" onClick={() => router.push("/customers")}>
+        <div className="flex flex-col-reverse gap-2 border-t border-ash px-4 py-3 sm:flex-row sm:justify-end">
+          <Button type="button" variant="secondary" onClick={() => router.push("/customers")} className="w-full sm:w-auto">
             Cancel
           </Button>
-          <Button type="submit" loading={saving}>
+          <Button type="submit" loading={saving} className="w-full sm:w-auto">
             {customer ? "Save changes" : "Create customer"}
           </Button>
         </div>

@@ -7,10 +7,23 @@ import { formatDate, formatMoney } from "@/lib/format";
 import { useToast } from "@/components/ui/toast";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import { Input, Select } from "@/components/ui/field";
+import { FilterSelect, SearchInput } from "@/components/ui/field";
 import { InvoiceStatusBadge } from "@/components/ui/badge";
-import { EmptyState, ErrorState, LoadingState } from "@/components/ui/states";
-import { Pagination, Table, TableWrap, Td, Th } from "@/components/ui/table";
+import { EmptyState, ErrorState, TableSkeleton } from "@/components/ui/states";
+import { Icon } from "@/components/ui/icons";
+import {
+  Amount,
+  MobileFacts,
+  MobileList,
+  MobileRow,
+  Mono,
+  Pagination,
+  Table,
+  TableWrap,
+  Td,
+  Th,
+  Tr,
+} from "@/components/ui/table";
 import { PageHeader } from "@/components/app/page-header";
 import {
   INVOICE_STATUSES,
@@ -49,7 +62,7 @@ export default function InvoicesPage() {
       if (status) query.set("status", status);
       setResult(await api.get<PagedResult<InvoiceListItem>>(`/api/invoices?${query}`));
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not load invoices.");
+      setError(err instanceof Error ? err.message : "We couldn't load your invoices.");
     } finally {
       setLoading(false);
     }
@@ -64,7 +77,7 @@ export default function InvoicesPage() {
     try {
       const { blob, fileName } = await api.downloadInvoicePdf(invoice.id);
       saveBlob(blob, fileName);
-      toast("PDF downloaded.", "success");
+      toast("PDF downloaded", "success");
     } catch (err) {
       toast(err instanceof Error ? err.message : "Could not generate the PDF.", "error");
     } finally {
@@ -79,26 +92,25 @@ export default function InvoicesPage() {
     <>
       <PageHeader
         title="Invoices"
-        description="Raised from accepted quotations."
+        description="Track what you've billed and what's been settled."
       />
 
       <Card>
-        <div className="flex flex-wrap gap-3 border-b border-slate-200 px-4 py-3">
-          <Input
+        <div className="flex flex-wrap gap-2 border-b border-ash p-3">
+          <SearchInput
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search by number or customer"
+            placeholder="Search invoices…"
             aria-label="Search invoices"
-            className="sm:max-w-xs"
+            className="min-w-0 flex-1 sm:max-w-xs"
           />
-          <Select
+          <FilterSelect
             value={status}
             onChange={(e) => {
               setStatus(e.target.value);
               setPage(1);
             }}
             aria-label="Filter by status"
-            className="sm:max-w-40"
           >
             <option value="">All statuses</option>
             {INVOICE_STATUSES.map((value) => (
@@ -106,11 +118,11 @@ export default function InvoicesPage() {
                 {INVOICE_STATUS_LABELS[value]}
               </option>
             ))}
-          </Select>
+          </FilterSelect>
         </div>
 
         {loading ? (
-          <LoadingState />
+          <TableSkeleton rows={6} columns={6} />
         ) : error ? (
           <ErrorState message={error} onRetry={load} />
         ) : isEmpty ? (
@@ -118,13 +130,13 @@ export default function InvoicesPage() {
             title={filtered ? "No matching invoices" : "No invoices yet"}
             description={
               filtered
-                ? "Try a different search or status filter."
-                : "Accept a quotation, then convert it into an invoice from the quotation page."
+                ? "Try a different search term or status filter."
+                : "Invoices are raised from accepted quotations. Open an accepted quotation to convert it."
             }
             action={
               !filtered && (
                 <Link href="/quotations?status=Accepted">
-                  <Button variant="secondary">Go to quotations</Button>
+                  <Button variant="secondary">View accepted quotations</Button>
                 </Link>
               )
             }
@@ -137,8 +149,8 @@ export default function InvoicesPage() {
                   <tr>
                     <Th>Invoice</Th>
                     <Th>Customer</Th>
-                    <Th>Date</Th>
-                    <Th>Due date</Th>
+                    <Th>Issued</Th>
+                    <Th>Due</Th>
                     <Th>Status</Th>
                     <Th align="right">Amount</Th>
                     <Th align="right">Actions</Th>
@@ -146,29 +158,29 @@ export default function InvoicesPage() {
                 </thead>
                 <tbody>
                   {result!.items.map((invoice) => (
-                    <tr key={invoice.id} className="hover:bg-slate-50">
+                    <Tr key={invoice.id}>
                       <Td>
                         <Link
                           href={`/invoices/${invoice.id}`}
-                          className="font-medium text-blue-600 hover:underline"
+                          className="font-medium text-electric hover:underline"
                         >
-                          {invoice.invoiceNumber}
+                          <Mono>{invoice.invoiceNumber}</Mono>
                         </Link>
-                        <p className="mt-0.5 text-xs text-slate-500">from {invoice.quotationNumber}</p>
+                        <p className="mt-0.5 text-caption text-fog">from {invoice.quotationNumber}</p>
                       </Td>
-                      <Td>{invoice.customerName}</Td>
+                      <Td className="text-charcoal">{invoice.customerName}</Td>
                       <Td>{formatDate(invoice.invoiceDate)}</Td>
                       <Td>
                         {formatDate(invoice.dueDate)}
                         {invoice.isOverdue && (
-                          <p className="mt-0.5 text-xs font-medium text-red-600">Past due</p>
+                          <p className="mt-0.5 text-caption font-medium text-rose-ink">Past due</p>
                         )}
                       </Td>
                       <Td>
                         <InvoiceStatusBadge status={invoice.status} />
                       </Td>
-                      <Td align="right" className="font-medium text-slate-900">
-                        {formatMoney(invoice.grandTotal, invoice.currency)}
+                      <Td align="right">
+                        <Amount>{formatMoney(invoice.grandTotal, invoice.currency)}</Amount>
                       </Td>
                       <Td align="right">
                         <div className="flex justify-end gap-1">
@@ -177,6 +189,7 @@ export default function InvoicesPage() {
                             size="sm"
                             loading={downloading === invoice.id}
                             onClick={() => download(invoice)}
+                            aria-label={`Download ${invoice.invoiceNumber} as PDF`}
                           >
                             PDF
                           </Button>
@@ -187,11 +200,64 @@ export default function InvoicesPage() {
                           </Link>
                         </div>
                       </Td>
-                    </tr>
+                    </Tr>
                   ))}
                 </tbody>
               </Table>
             </TableWrap>
+
+            <MobileList>
+              {result!.items.map((invoice) => (
+                <MobileRow key={invoice.id}>
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <Link
+                        href={`/invoices/${invoice.id}`}
+                        className="font-medium text-electric hover:underline"
+                      >
+                        <Mono>{invoice.invoiceNumber}</Mono>
+                      </Link>
+                      <p className="mt-0.5 text-caption text-fog">from {invoice.quotationNumber}</p>
+                    </div>
+                    <InvoiceStatusBadge status={invoice.status} />
+                  </div>
+                  <MobileFacts
+                    items={[
+                      { label: "Customer", value: invoice.customerName },
+                      {
+                        label: "Amount",
+                        value: <Amount>{formatMoney(invoice.grandTotal, invoice.currency)}</Amount>,
+                      },
+                      { label: "Issued", value: formatDate(invoice.invoiceDate) },
+                      {
+                        label: "Due",
+                        value: invoice.isOverdue ? (
+                          <span className="text-rose-ink">{formatDate(invoice.dueDate)}</span>
+                        ) : (
+                          formatDate(invoice.dueDate)
+                        ),
+                      },
+                    ]}
+                  />
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      loading={downloading === invoice.id}
+                      onClick={() => download(invoice)}
+                    >
+                      <Icon.download className="h-3.5 w-3.5" />
+                      PDF
+                    </Button>
+                    <Link href={`/invoices/${invoice.id}`}>
+                      <Button variant="secondary" size="sm">
+                        View
+                      </Button>
+                    </Link>
+                  </div>
+                </MobileRow>
+              ))}
+            </MobileList>
 
             <Pagination
               page={result!.page}
