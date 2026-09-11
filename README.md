@@ -49,8 +49,15 @@ quotely/
 
 ## Configuration
 
-No secrets are committed. The API reads configuration from `appsettings.json`, environment
-variables, and (in development) user secrets. Environment variables use `__` for nesting.
+No secrets are committed. The API reads configuration from `appsettings.json`,
+`appsettings.{Environment}.json`, environment variables, and (in development) user secrets.
+Environment variables use `__` for nesting and take precedence over the files.
+
+Quotely runs in four environments — **DEV**, **TEST**, **UAT** and **PROD** — selected by
+`ASPNETCORE_ENVIRONMENT` (`Development`, `Test`, `UAT`, `Production`). The committed
+`appsettings.{Environment}.json` files hold non-secret settings only; every credential comes from
+an environment variable. See **[docs/environments.md](docs/environments.md)** for the full matrix,
+the deployment flow and the migration procedure.
 
 | Setting | Environment variable | Notes |
 | ------- | -------------------- | ----- |
@@ -75,6 +82,9 @@ Copy it from the provided example:
 ```bash
 cp frontend/quotely-web/.env.local.example frontend/quotely-web/.env.local
 ```
+
+`NEXT_PUBLIC_` variables are inlined into the browser bundle and are readable by anyone — never
+give a secret that prefix.
 
 ## Setting up the database
 
@@ -308,7 +318,21 @@ without a Pay button — nothing breaks.
 The test suite never contacts Razorpay: `IPaymentProvider` is replaced by a fake that uses the same
 HMAC schemes, so signature handling is genuinely exercised offline.
 
+## Continuous integration
+
+Every push and pull request on `main` and `develop` runs
+[`.github/workflows/ci.yml`](.github/workflows/ci.yml): the backend is restored, built and tested,
+and the frontend is typechecked, linted and built. CI needs **no secrets** — the test suite runs
+offline against in-memory SQLite and a stand-in payment provider.
+
+## Branching
+
+`feature/*` → `develop` → `main`. `develop` deploys to DEV/TEST, `main` to UAT and then PROD after
+sign-off. Environments are deployment targets rather than branches; see
+[docs/environments.md](docs/environments.md).
+
 ## Documentation
 
+- [docs/environments.md](docs/environments.md) — environments, secrets, branching, deployment
 - [docs/architecture.md](docs/architecture.md) — structure, data model, request flow, security
 - [docs/api.md](docs/api.md) — endpoint reference with payloads

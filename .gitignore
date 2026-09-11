@@ -1,28 +1,73 @@
-# .NET
+# ---- .NET ----------------------------------------------------------------
 bin/
 obj/
 *.user
-*.db
-*.db-shm
-*.db-wal
+*.suo
+*.userosscache
+*.sln.docstates
+TestResults/
+[Tt]est[Rr]esult*/
+*.coverage
+*.trx
 
-# Node / Next.js
+# Local configuration overrides. The committed appsettings.{Environment}.json files
+# carry non-secret settings only; anything sensitive belongs in environment
+# variables or the host's secret store — see docs/environments.md.
+appsettings.*.local.json
+appsettings.Local.json
+
+# ---- Node / Next.js ------------------------------------------------------
 node_modules/
 .next/
 out/
+build/
 next-env.d.ts
+.turbo/
+*.tsbuildinfo
 
-# Environment & secrets
+# ---- Environment files ---------------------------------------------------
+# Only *.example files are committed. Never the real ones.
 .env
 .env.local
+.env.development.local
+.env.test.local
+.env.production.local
 .env*.local
-appsettings.*.local.json
+!.env*.example
 
-# OS / editors
+# ---- Databases -----------------------------------------------------------
+# Local SQLite development databases, including WAL/shared-memory sidecars.
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite3
+*.mdf
+*.ldf
+
+# ---- Secrets, keys and certificates --------------------------------------
+*.pem
+*.key
+*.pfx
+*.p12
+*.jks
+*.keystore
+id_rsa
+id_rsa.*
+secrets.json
+secrets.*.json
+
+# ---- Generated documents -------------------------------------------------
+# PDFs rendered while testing land in the working directory.
+/*.pdf
+
+# ---- OS / editors --------------------------------------------------------
 .DS_Store
+Thumbs.db
 .vscode/
 .idea/
+*.swp
 
-# Next.js agent rule files (regenerated on dev)
+# ---- Next.js agent rule files (regenerated on dev) -----------------------
 AGENTS.md
 CLAUDE.md

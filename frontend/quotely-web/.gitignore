@@ -32,6 +32,9 @@ yarn-error.log*
 
 # env files (can opt-in for committing if needed)
 .env*
+# ...but the templates must be committed: the README tells a new developer to copy
+# .env.local.example, which the blanket rule above would otherwise exclude.
+!.env*.example
 
 # vercel
 .vercel

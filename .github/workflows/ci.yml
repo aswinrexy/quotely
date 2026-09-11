@@ -1,0 +1,78 @@
+name: CI
+
+# Validates every push and pull request on the long-lived branches.
+#
+# This pipeline deliberately needs NO secrets. The backend test suite runs
+# entirely offline against in-memory SQLite and a stand-in payment provider, and
+# the frontend build needs only a placeholder API URL. A contributor's fork can
+# therefore run the full check, and a leaked workflow log can reveal nothing.
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+  workflow_dispatch:
+
+# Cancel superseded runs on the same branch rather than paying for both.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  backend:
+    name: Backend (build + test)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Restore
+        run: dotnet restore backend/Quotely.slnx
+
+      - name: Build
+        run: dotnet build backend/Quotely.slnx --configuration Release --no-restore
+
+      - name: Test
+        # The suite boots the real API against private in-memory SQLite and a fake
+        # payment provider, so nothing here reaches Razorpay or a real database.
+        run: dotnet test backend/Quotely.slnx --configuration Release --no-build --verbosity normal
+
+  frontend:
+    name: Frontend (typecheck + lint + build)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend/quotely-web
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22.x'
+          cache: npm
+          cache-dependency-path: frontend/quotely-web/package-lock.json
+
+      - name: Install
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Build
+        # A placeholder, never a real host: the production build only needs the
+        # variable to exist, and the deployed value is set by the hosting platform.
+        env:
+          NEXT_PUBLIC_API_BASE_URL: http://localhost:5199
+        run: npm run build
