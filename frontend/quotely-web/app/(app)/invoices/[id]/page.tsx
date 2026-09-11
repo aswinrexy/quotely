@@ -20,13 +20,18 @@ import {
   PartyBlock,
   Totals,
 } from "@/components/app/document-view";
-import { INVOICE_STATUS_LABELS, type Invoice } from "@/types";
+import {
+  PaymentHistoryCard,
+  InvoiceShareCard,
+} from "@/components/app/invoice-payments-card";
+import { INVOICE_STATUS_LABELS, type Invoice, type InvoicePayments } from "@/types";
 
 export default function InvoiceDetailPage() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
   const toast = useToast();
   const [invoice, setInvoice] = useState<Invoice | null>(null);
+  const [payments, setPayments] = useState<InvoicePayments | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [downloading, setDownloading] = useState(false);
@@ -37,11 +42,34 @@ export default function InvoiceDetailPage() {
     setLoading(true);
     setError(null);
     try {
-      setInvoice(await api.get<Invoice>(`/api/invoices/${id}`));
+      const [loaded, history] = await Promise.all([
+        api.get<Invoice>(`/api/invoices/${id}`),
+        api.get<InvoicePayments>(`/api/invoices/${id}/payments`),
+      ]);
+      setInvoice(loaded);
+      setPayments(history);
     } catch (err) {
       setError(err instanceof Error ? err.message : "We couldn't load this invoice.");
     } finally {
       setLoading(false);
+    }
+  }, [id]);
+
+  /**
+   * Refreshes in place, without the loading state. The share panel keeps the generated URL in
+   * its own state, and that URL can never be fetched again — a refresh that unmounted the panel
+   * would throw the link away before the owner could copy it.
+   */
+  const refresh = useCallback(async () => {
+    try {
+      const [loaded, history] = await Promise.all([
+        api.get<Invoice>(`/api/invoices/${id}`),
+        api.get<InvoicePayments>(`/api/invoices/${id}/payments`),
+      ]);
+      setInvoice(loaded);
+      setPayments(history);
+    } catch {
+      // A failed background refresh leaves the page on the data it already has.
     }
   }, [id]);
 
@@ -98,10 +126,10 @@ export default function InvoiceDetailPage() {
     customer.country,
   ].filter(Boolean) as string[];
 
-  // Payments arrive in a later version; until then the whole amount is outstanding unless the
-  // owner has marked the invoice paid. These figures are presentational only.
-  const paid = invoice.status === "Paid" ? invoice.grandTotal : 0;
-  const outstanding = invoice.grandTotal - paid;
+  // Both figures are computed by the server from captured payments. The browser never adds up
+  // money of its own.
+  const paid = invoice.paid;
+  const outstanding = invoice.outstanding;
 
   return (
     <>
@@ -251,6 +279,10 @@ export default function InvoiceDetailPage() {
               </div>
             </div>
           </Card>
+
+          <InvoiceShareCard invoice={invoice} onChanged={refresh} />
+
+          <PaymentHistoryCard payments={payments} />
 
           {/* What can still be changed, said plainly rather than left for a failed save to reveal. */}
           {(!invoice.canEdit || !invoice.canEditItems) && (

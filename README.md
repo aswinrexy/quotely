@@ -7,6 +7,8 @@ quotation, and download a professional PDF you can send to a customer.
 Sign up → Business profile → Customer → Products/Services → Quotation → Totals → PDF → Download
                                                                   ↓
                                       Share link → Customer accepts → Invoice → Invoice PDF
+                                                                          ↓
+                                                      Payment link → Customer pays → Paid
 ```
 
 ## Tech stack
@@ -218,6 +220,56 @@ quotation status. Line items can only be changed while the invoice is a draft; a
 due date defaults to 15 days after the invoice date and is editable while the invoice is a draft.
 
 Payments are not part of this version.
+
+## Online payments (Razorpay)
+
+An issued invoice can be shared as a payment link. The customer opens `/i/{token}`, sees the
+outstanding balance and pays through Razorpay Checkout; the invoice updates from the server's own
+record of what was captured, never from the browser.
+
+### Configuration
+
+Three values, all server-side. Never commit them.
+
+| Setting | Environment variable | Purpose |
+| ------- | -------------------- | ------- |
+| `Razorpay:KeyId` | `Razorpay__KeyId` | Publishable key. Sent to the browser to open checkout. |
+| `Razorpay:KeySecret` | `Razorpay__KeySecret` | Signs API calls and verifies checkout signatures. **Server only.** |
+| `Razorpay:WebhookSecret` | `Razorpay__WebhookSecret` | Verifies webhook signatures. **Server only.** |
+
+In development, use user secrets rather than a file:
+
+```bash
+cd backend/Quotely.Api
+dotnet user-secrets init
+dotnet user-secrets set "Razorpay:KeyId" "rzp_test_xxxxxxxx"
+dotnet user-secrets set "Razorpay:KeySecret" "xxxxxxxx"
+dotnet user-secrets set "Razorpay:WebhookSecret" "xxxxxxxx"
+```
+
+With no keys configured the app runs normally and the public invoice page simply shows the balance
+without a Pay button — nothing breaks.
+
+### Testing a payment end to end
+
+1. Create a Razorpay account and copy the **test mode** Key ID and Key Secret from
+   Dashboard → Account & Settings → API Keys.
+2. In Dashboard → Account & Settings → Webhooks, add a webhook pointing at
+   `https://<your-host>/api/webhooks/razorpay`. Locally, expose the API with a tunnel first.
+   Set a webhook secret and configure it as `Razorpay__WebhookSecret`.
+3. Subscribe the webhook to `payment.authorized`, `payment.captured`, `payment.failed` and
+   `order.paid`.
+4. Start the API and the web app, then sign in.
+5. Create a quotation, mark it Accepted and convert it to an invoice.
+6. On the invoice, choose **Create payment link** and copy the URL.
+7. Open `/i/{token}` — in a private window, to prove no session is involved.
+8. Choose **Pay**, and use a Razorpay test instrument (for example the test card
+   `4111 1111 1111 1111` with any future expiry and any CVV, or the `success@razorpay` test UPI id).
+9. The page shows the server-verified result, and the owner's invoice shows the payment under
+   **Payment history** with the balance and status updated.
+
+The test suite never contacts Razorpay: `IPaymentProvider` is replaced by a fake that uses the same
+HMAC schemes, so signature handling is genuinely exercised offline.
 
 ## Documentation
 

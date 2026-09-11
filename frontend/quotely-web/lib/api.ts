@@ -130,6 +130,9 @@ export const publicApi = {
     publicApi.request<T>(path, { method: "POST", body: JSON.stringify(body) }),
 
   pdfUrl: (token: string) => `${API_BASE_URL}/api/public/quotations/${encodeURIComponent(token)}/pdf`,
+
+  invoicePdfUrl: (token: string) =>
+    `${API_BASE_URL}/api/public/invoices/${encodeURIComponent(token)}/pdf`,
 };
 
 export function saveBlob(blob: Blob, fileName: string) {

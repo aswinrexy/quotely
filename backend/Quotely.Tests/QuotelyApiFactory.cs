@@ -9,6 +9,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Quotely.Api.Data;
 using Quotely.Api.DTOs;
+using Quotely.Api.Payments;
 
 namespace Quotely.Tests;
 
@@ -20,6 +21,12 @@ public class QuotelyApiFactory : WebApplicationFactory<Program>, IAsyncLifetime
 {
     private readonly SqliteConnection _connection = new("DataSource=:memory:");
 
+    /// <summary>
+    /// The stand-in payment provider. Tests arrange outcomes on it; nothing in the suite ever
+    /// reaches Razorpay over the network.
+    /// </summary>
+    public FakePaymentProvider Payments { get; } = new();
+
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
         builder.UseEnvironment(Environments.Development);
@@ -30,7 +37,11 @@ public class QuotelyApiFactory : WebApplicationFactory<Program>, IAsyncLifetime
             ["Database:AutoMigrate"] = "false",
             ["Seed:Enabled"] = "false",
             ["Jwt:Key"] = "integration-test-signing-key-at-least-32-chars",
-            ["ConnectionStrings:DefaultConnection"] = "DataSource=:memory:"
+            ["ConnectionStrings:DefaultConnection"] = "DataSource=:memory:",
+            // Placeholders only: the fake provider below replaces the real adapter entirely.
+            ["Razorpay:KeyId"] = FakePaymentProvider.TestKeyId,
+            ["Razorpay:KeySecret"] = FakePaymentProvider.TestKeySecret,
+            ["Razorpay:WebhookSecret"] = FakePaymentProvider.TestWebhookSecret
         }));
 
         builder.ConfigureServices(services =>
@@ -38,6 +49,9 @@ public class QuotelyApiFactory : WebApplicationFactory<Program>, IAsyncLifetime
             services.RemoveAll(typeof(DbContextOptions<AppDbContext>));
             services.RemoveAll(typeof(AppDbContext));
             services.AddDbContext<AppDbContext>(options => options.UseSqlite(_connection));
+
+            services.RemoveAll(typeof(IPaymentProvider));
+            services.AddSingleton<IPaymentProvider>(Payments);
         });
     }
 
@@ -65,6 +79,23 @@ public class QuotelyApiFactory : WebApplicationFactory<Program>, IAsyncLifetime
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
         var quotation = await db.Quotations.AsNoTracking().FirstAsync(q => q.Id == quotationId);
         return select(quotation);
+    }
+
+    /// <summary>Reads payment rows directly, so tests can assert on columns the API never exposes.</summary>
+    public async Task<List<Quotely.Api.Models.Payment>> ReadPaymentsAsync(Guid invoiceId)
+    {
+        using var scope = Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        return await db.Payments.AsNoTracking().Where(p => p.InvoiceId == invoiceId).ToListAsync();
+    }
+
+    /// <summary>Reads the stored token hash, to prove the raw token is never persisted.</summary>
+    public async Task<string?> ReadInvoiceTokenHashAsync(Guid invoiceId)
+    {
+        using var scope = Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        return await db.Invoices.AsNoTracking().Where(i => i.Id == invoiceId)
+            .Select(i => i.PublicTokenHash).FirstAsync();
     }
 
     /// <summary>Counts the invoices raised against one quotation, straight from the database.</summary>

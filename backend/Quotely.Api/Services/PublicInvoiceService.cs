@@ -1,0 +1,310 @@
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
+using Quotely.Api.Data;
+using Quotely.Api.DTOs;
+using Quotely.Api.Middleware;
+using Quotely.Api.Models;
+using Quotely.Api.Payments;
+
+namespace Quotely.Api.Services;
+
+public interface IPublicInvoiceService
+{
+    Task<PublicInvoiceLinkDto> CreateLinkAsync(Guid userId, Guid invoiceId, CancellationToken ct = default);
+    Task<PublicInvoiceDto> GetAsync(string token, CancellationToken ct = default);
+    Task<PaymentOrderDto> CreatePaymentOrderAsync(string token, CancellationToken ct = default);
+    Task<VerifyPaymentResponse> VerifyPaymentAsync(string token, VerifyPaymentRequest request, CancellationToken ct = default);
+    Task<(Invoice Invoice, BusinessProfile? Business)> GetForPdfAsync(string token, CancellationToken ct = default);
+}
+
+/// <summary>
+/// The customer-facing invoice, reached by a bearer token rather than a session. Deliberately
+/// built on the same primitives as the quotation share link — <see cref="PublicTokenGenerator"/>
+/// and hash-only storage — so there is one public-link security model in this codebase, not two.
+/// </summary>
+public class PublicInvoiceService : IPublicInvoiceService
+{
+    private readonly AppDbContext _db;
+    private readonly IPaymentService _payments;
+    private readonly IPaymentProvider _provider;
+    private readonly PublicLinkOptions _options;
+    private readonly ILogger<PublicInvoiceService> _logger;
+
+    public PublicInvoiceService(
+        AppDbContext db,
+        IPaymentService payments,
+        IPaymentProvider provider,
+        IOptions<PublicLinkOptions> options,
+        ILogger<PublicInvoiceService> logger)
+    {
+        _db = db;
+        _payments = payments;
+        _provider = provider;
+        _options = options.Value;
+        _logger = logger;
+    }
+
+    private static DateOnly Today => DateOnly.FromDateTime(DateTime.UtcNow);
+
+    // ---- owner ----------------------------------------------------------
+
+    /// <summary>
+    /// Mints the payment link for one of the caller's own invoices. Only the hash is kept, so the
+    /// URL in this response is the one and only copy; asking again issues a new link and retires
+    /// the old one, which is also how a link is revoked.
+    /// </summary>
+    public async Task<PublicInvoiceLinkDto> CreateLinkAsync(Guid userId, Guid invoiceId, CancellationToken ct = default)
+    {
+        var invoice = await _db.Invoices.FirstOrDefaultAsync(i => i.Id == invoiceId && i.UserId == userId, ct)
+                      ?? throw ApiException.NotFound("Invoice");
+
+        if (invoice.Status == InvoiceStatus.Cancelled)
+            throw ApiException.Conflict("A cancelled invoice cannot be shared.");
+
+        var token = PublicTokenGenerator.CreateToken();
+        invoice.PublicTokenHash = PublicTokenGenerator.Hash(token);
+        invoice.PublicLinkCreatedAt = DateTime.UtcNow;
+
+        // Sharing the link is the act of issuing the invoice, mirroring what quotations do.
+        // Anything already beyond Draft keeps the status its owner gave it.
+        if (invoice.Status == InvoiceStatus.Draft)
+            invoice.Status = InvoiceStatus.Sent;
+
+        await _db.SaveChangesAsync(ct);
+
+        _logger.LogInformation("Created public payment link for invoice {InvoiceId}", invoice.Id);
+
+        return new PublicInvoiceLinkDto(BuildUrl(token), invoice.PublicLinkCreatedAt.Value);
+    }
+
+    // ---- customer -------------------------------------------------------
+
+    public async Task<PublicInvoiceDto> GetAsync(string token, CancellationToken ct = default)
+    {
+        var invoice = await FindByTokenAsync(token, tracking: false, ct);
+        return await MapAsync(invoice, ct);
+    }
+
+    public async Task<PaymentOrderDto> CreatePaymentOrderAsync(string token, CancellationToken ct = default)
+    {
+        // Note what this method does not accept: an amount, a currency, an invoice id. The token
+        // selects the invoice and the server computes everything else.
+        var invoice = await FindByTokenAsync(token, tracking: true, ct);
+        var business = await LoadBusinessAsync(invoice.UserId, ct);
+
+        var (payment, order) = await _payments.StartPaymentAsync(invoice, ct);
+
+        return new PaymentOrderDto
+        {
+            KeyId = _provider.PublicKey,
+            OrderId = order.OrderId,
+            Amount = order.AmountInMinorUnits,
+            Currency = order.Currency,
+            InvoiceNumber = invoice.InvoiceNumber,
+            BusinessName = business?.BusinessName ?? "Invoice",
+            CustomerName = payment.CustomerName,
+            CustomerEmail = payment.CustomerEmail,
+            CustomerContact = invoice.CustomerPhone
+        };
+    }
+
+    /// <summary>
+    /// Confirms a checkout result. The signature proves the provider produced it, and the
+    /// provider itself is then asked what really happened — the browser's claim of success is
+    /// never sufficient on its own.
+    /// </summary>
+    public async Task<VerifyPaymentResponse> VerifyPaymentAsync(
+        string token, VerifyPaymentRequest request, CancellationToken ct = default)
+    {
+        var invoice = await FindByTokenAsync(token, tracking: false, ct);
+
+        // The order must be one we created for this very invoice. Without this check a valid
+        // signature from someone else's order would credit the wrong invoice.
+        var order = await _db.Payments.AsNoTracking()
+            .FirstOrDefaultAsync(p => p.ProviderOrderId == request.RazorpayOrderId, ct);
+
+        if (order is null || order.InvoiceId != invoice.Id)
+        {
+            _logger.LogWarning(
+                "Rejected verification: order {ProviderOrderId} does not belong to invoice {InvoiceId}",
+                request.RazorpayOrderId, invoice.Id);
+            throw ApiException.BadRequest("This payment does not belong to this invoice.");
+        }
+
+        try
+        {
+            _provider.VerifyCheckoutSignature(
+                new CheckoutResult(request.RazorpayOrderId, request.RazorpayPaymentId, request.RazorpaySignature));
+        }
+        catch (PaymentSignatureException ex)
+        {
+            _logger.LogWarning(
+                "Signature verification failed for payment {ProviderPaymentId} on invoice {InvoiceId}: {Reason}",
+                request.RazorpayPaymentId, invoice.Id, ex.Message);
+            throw ApiException.BadRequest("This payment could not be verified.");
+        }
+
+        // Ask the provider for the truth rather than trusting the callback's implied outcome.
+        PaymentOutcome outcome;
+        try
+        {
+            outcome = await _provider.GetPaymentAsync(request.RazorpayPaymentId, ct);
+        }
+        catch (PaymentProviderException ex)
+        {
+            _logger.LogWarning(ex,
+                "Could not confirm payment {ProviderPaymentId} with the provider", request.RazorpayPaymentId);
+            throw new ApiException(System.Net.HttpStatusCode.BadGateway,
+                "We could not confirm this payment yet. It will be updated automatically once the provider confirms it.");
+        }
+
+        if (!string.Equals(outcome.ProviderOrderId, request.RazorpayOrderId, StringComparison.Ordinal))
+            throw ApiException.BadRequest("This payment does not belong to this invoice.");
+
+        // One shared path into the database, used by the webhook too.
+        var payment = await _payments.ProcessOutcomeAsync(outcome with
+        {
+            ProviderPaymentId = request.RazorpayPaymentId,
+            ProviderOrderId = request.RazorpayOrderId
+        }, ct);
+
+        var summary = await _payments.GetSummaryAsync(invoice.Id, ct);
+
+        return new VerifyPaymentResponse
+        {
+            Success = payment.Status == PaymentStatus.Captured,
+            PaymentStatus = payment.Status.ToString(),
+            InvoiceStatus = summary.InvoiceStatus,
+            Total = summary.Total,
+            Paid = summary.Paid,
+            Outstanding = summary.Outstanding,
+            AmountPaid = payment.Status == PaymentStatus.Captured ? payment.Amount : 0m,
+            Currency = summary.Currency,
+            PaymentReference = payment.ProviderPaymentId,
+            Message = payment.Status switch
+            {
+                PaymentStatus.Captured => null,
+                PaymentStatus.Pending => "Your payment is being confirmed. There is no need to pay again.",
+                PaymentStatus.Failed => payment.FailureReason ?? "The payment could not be completed.",
+                _ => "The payment is still being processed."
+            }
+        };
+    }
+
+    public async Task<(Invoice Invoice, BusinessProfile? Business)> GetForPdfAsync(string token, CancellationToken ct = default)
+    {
+        var invoice = await FindByTokenAsync(token, tracking: false, ct);
+        return (invoice, await LoadBusinessAsync(invoice.UserId, ct));
+    }
+
+    // ---- helpers --------------------------------------------------------
+
+    /// <summary>
+    /// The hash is the only lookup key. An unknown, malformed or revoked token is an identical
+    /// 404, so a caller cannot learn whether any given invoice exists.
+    /// </summary>
+    private async Task<Invoice> FindByTokenAsync(string token, bool tracking, CancellationToken ct)
+    {
+        if (!PublicTokenGenerator.LooksValid(token))
+            throw ApiException.NotFound("Invoice");
+
+        var hash = PublicTokenGenerator.Hash(token);
+
+        var query = _db.Invoices
+            .Include(i => i.Items.OrderBy(x => x.SortOrder))
+            .Where(i => i.PublicTokenHash == hash);
+
+        if (!tracking) query = query.AsNoTracking();
+
+        var invoice = await query.FirstOrDefaultAsync(ct) ?? throw ApiException.NotFound("Invoice");
+
+        // A draft is not an issued document; a link to one behaves as if it does not exist.
+        if (invoice.Status == InvoiceStatus.Draft)
+            throw ApiException.NotFound("Invoice");
+
+        return invoice;
+    }
+
+    private Task<BusinessProfile?> LoadBusinessAsync(Guid userId, CancellationToken ct) =>
+        _db.BusinessProfiles.AsNoTracking().FirstOrDefaultAsync(b => b.UserId == userId, ct);
+
+    private string BuildUrl(string token) => $"{_options.BaseUrl.TrimEnd('/')}/i/{token}";
+
+    private async Task<PublicInvoiceDto> MapAsync(Invoice invoice, CancellationToken ct)
+    {
+        var business = await LoadBusinessAsync(invoice.UserId, ct);
+        var summary = await _payments.GetSummaryAsync(invoice.Id, ct);
+
+        var settled = await _db.Payments.AsNoTracking()
+            .Where(p => p.InvoiceId == invoice.Id && p.Status == PaymentStatus.Captured)
+            .OrderByDescending(p => p.PaidAt)
+            .Select(p => new PublicPaymentDto
+            {
+                Amount = p.Amount,
+                Method = p.Method,
+                Reference = p.ProviderPaymentId,
+                PaidAt = p.PaidAt
+            })
+            .ToListAsync(ct);
+
+        return new PublicInvoiceDto
+        {
+            InvoiceNumber = invoice.InvoiceNumber,
+            InvoiceDate = invoice.InvoiceDate,
+            DueDate = invoice.DueDate,
+            Business = new PublicBusinessDto
+            {
+                BusinessName = business?.BusinessName ?? "Invoice",
+                Email = business?.BusinessEmail,
+                Phone = business?.Phone,
+                AddressLine = business?.AddressLine,
+                City = business?.City,
+                State = business?.State,
+                PostalCode = business?.PostalCode,
+                Country = business?.Country,
+                TaxNumber = business?.TaxNumber,
+                LogoUrl = business?.LogoUrl
+            },
+            // The invoice's own billing snapshot, not the live customer record.
+            Customer = new PublicCustomerDto
+            {
+                Name = invoice.CustomerName,
+                CompanyName = invoice.CustomerCompanyName,
+                Email = invoice.CustomerEmail,
+                Phone = invoice.CustomerPhone,
+                AddressLine = invoice.CustomerAddressLine,
+                City = invoice.CustomerCity,
+                State = invoice.CustomerState,
+                PostalCode = invoice.CustomerPostalCode,
+                Country = invoice.CustomerCountry
+            },
+            Items = invoice.Items.OrderBy(i => i.SortOrder).Select(i => new PublicInvoiceItemDto
+            {
+                Name = i.Name,
+                Description = i.Description,
+                Unit = i.Unit,
+                Quantity = i.Quantity,
+                UnitPrice = i.UnitPrice,
+                Discount = i.Discount,
+                TaxRate = i.TaxRate,
+                LineTotal = i.LineTotal
+            }).ToList(),
+            Subtotal = invoice.Subtotal,
+            DiscountTotal = invoice.DiscountTotal,
+            TaxTotal = invoice.TaxTotal,
+            GrandTotal = invoice.GrandTotal,
+            Currency = invoice.Currency,
+            Notes = invoice.Notes,
+            Terms = invoice.Terms,
+            Status = invoice.Status.ToString(),
+            IsOverdue = invoice.IsOverdue(Today),
+            Paid = summary.Paid,
+            Outstanding = summary.Outstanding,
+            // Payments also require the provider to be configured; otherwise the page shows the
+            // balance without offering a button that cannot work.
+            CanPay = summary.CanPay && _provider.IsConfigured,
+            HasPendingPayment = summary.HasPendingPayment,
+            Payments = settled
+        };
+    }
+}

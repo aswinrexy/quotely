@@ -9,6 +9,7 @@ using QuestPDF.Infrastructure;
 using Quotely.Api.Data;
 using Quotely.Api.Middleware;
 using Quotely.Api.Models;
+using Quotely.Api.Payments;
 using Quotely.Api.Pdf;
 using Quotely.Api.Services;
 
@@ -91,6 +92,15 @@ builder.Services.AddScoped<ITokenService, TokenService>();
 builder.Services.AddScoped<IQuotationService, QuotationService>();
 builder.Services.AddScoped<IPublicQuotationService, PublicQuotationService>();
 builder.Services.AddScoped<IInvoiceService, InvoiceService>();
+builder.Services.AddScoped<IPublicInvoiceService, PublicInvoiceService>();
+builder.Services.AddScoped<IPaymentService, PaymentService>();
+builder.Services.AddScoped<IWebhookService, WebhookService>();
+
+// ---- payments ----
+// Credentials come from configuration only (Razorpay__KeyId, Razorpay__KeySecret,
+// Razorpay__WebhookSecret). Nothing is hard-coded and the secrets never leave the server.
+builder.Services.Configure<RazorpayOptions>(builder.Configuration.GetSection(RazorpayOptions.SectionName));
+builder.Services.AddHttpClient<IPaymentProvider, RazorpayPaymentProvider>();
 builder.Services.Configure<PublicLinkOptions>(builder.Configuration.GetSection(PublicLinkOptions.SectionName));
 builder.Services.AddSingleton<IPdfService, PdfService>();
 

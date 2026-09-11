@@ -14,4 +14,5 @@ public class AppUser : IdentityUser<Guid>
     public ICollection<Product> Products { get; set; } = new List<Product>();
     public ICollection<Quotation> Quotations { get; set; } = new List<Quotation>();
     public ICollection<Invoice> Invoices { get; set; } = new List<Invoice>();
+    public ICollection<Payment> Payments { get; set; } = new List<Payment>();
 }

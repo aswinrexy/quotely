@@ -17,6 +17,8 @@ public class AppDbContext : IdentityDbContext<AppUser, IdentityRole<Guid>, Guid>
     public DbSet<QuotationItem> QuotationItems => Set<QuotationItem>();
     public DbSet<Invoice> Invoices => Set<Invoice>();
     public DbSet<InvoiceItem> InvoiceItems => Set<InvoiceItem>();
+    public DbSet<Payment> Payments => Set<Payment>();
+    public DbSet<WebhookEvent> WebhookEvents => Set<WebhookEvent>();
 
     /// <summary>
     /// Neither SQL Server's datetime2 nor SQLite stores a timezone, so values read back arrive as
@@ -142,6 +144,10 @@ public class AppDbContext : IdentityDbContext<AppUser, IdentityRole<Guid>, Guid>
             e.Property(x => x.DiscountTotal).HasPrecision(18, 2);
             e.Property(x => x.TaxTotal).HasPrecision(18, 2);
             e.Property(x => x.GrandTotal).HasPrecision(18, 2);
+            // Lookup key for the customer-facing payment link; unique so a token can never
+            // resolve to two invoices.
+            e.Property(x => x.PublicTokenHash).HasMaxLength(64);
+            e.HasIndex(x => x.PublicTokenHash).IsUnique();
             e.HasOne(x => x.User).WithMany(u => u.Invoices)
                 .HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Cascade);
             // Restrict on both sides: an invoiced quotation and an invoiced customer must not be
@@ -150,6 +156,47 @@ public class AppDbContext : IdentityDbContext<AppUser, IdentityRole<Guid>, Guid>
                 .HasForeignKey<Invoice>(x => x.QuotationId).OnDelete(DeleteBehavior.Restrict);
             e.HasOne(x => x.Customer).WithMany(c => c.Invoices)
                 .HasForeignKey(x => x.CustomerId).OnDelete(DeleteBehavior.Restrict);
+        });
+
+        b.Entity<Payment>(e =>
+        {
+            e.HasIndex(x => x.InvoiceId);
+            e.HasIndex(x => new { x.UserId, x.CreatedAt });
+            e.HasIndex(x => new { x.InvoiceId, x.Status });
+            // One order may be attempted more than once, so this is an index, not a constraint.
+            e.HasIndex(x => x.ProviderOrderId);
+            // One provider payment maps to exactly one internal record. Enforced by the database
+            // rather than by an application "if not exists" check, so a duplicate webhook and a
+            // duplicate checkout callback racing each other still cannot double-count money.
+            e.HasIndex(x => x.ProviderPaymentId).IsUnique();
+            e.Property(x => x.Amount).HasPrecision(18, 2);
+            e.Property(x => x.Currency).HasMaxLength(3).IsRequired();
+            e.Property(x => x.Provider).HasMaxLength(30).IsRequired();
+            e.Property(x => x.ProviderOrderId).HasMaxLength(80).IsRequired();
+            e.Property(x => x.ProviderPaymentId).HasMaxLength(80);
+            e.Property(x => x.Method).HasMaxLength(40);
+            e.Property(x => x.CustomerName).HasMaxLength(200);
+            e.Property(x => x.CustomerEmail).HasMaxLength(256);
+            e.Property(x => x.FailureReason).HasMaxLength(500);
+            e.Property(x => x.ConcurrencyStamp).IsConcurrencyToken();
+            e.HasOne(x => x.Invoice).WithMany(i => i.Payments)
+                .HasForeignKey(x => x.InvoiceId).OnDelete(DeleteBehavior.Cascade);
+            // No second cascade path to AspNetUsers: SQL Server rejects multiple cascade routes,
+            // and payments already disappear with their invoice.
+            e.HasOne<AppUser>().WithMany(u => u.Payments)
+                .HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.NoAction);
+        });
+
+        b.Entity<WebhookEvent>(e =>
+        {
+            // The idempotency key. A retried delivery fails this insert and is acknowledged
+            // without being processed again.
+            e.HasIndex(x => new { x.Provider, x.EventId }).IsUnique();
+            e.Property(x => x.Provider).HasMaxLength(30).IsRequired();
+            e.Property(x => x.EventId).HasMaxLength(120).IsRequired();
+            e.Property(x => x.EventType).HasMaxLength(80).IsRequired();
+            e.Property(x => x.ProviderOrderId).HasMaxLength(80);
+            e.Property(x => x.ProviderPaymentId).HasMaxLength(80);
         });
 
         b.Entity<InvoiceItem>(e =>

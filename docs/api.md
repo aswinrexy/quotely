@@ -357,6 +357,108 @@ Content-Type: application/pdf
 Content-Disposition: attachment; filename=INV-000001-John-Smith.pdf
 ```
 
+### `POST /api/invoices/{id}/public-link`
+
+Creates the customer-facing payment link for one of the caller's own invoices.
+
+```json
+{ "url": "https://quotely.app/i/7f9c2a…", "createdAt": "2026-09-12T09:14:00Z" }
+```
+
+Only a SHA-256 hash of the token is stored, so **this response is the one and only time the URL
+exists**. Calling again mints a new token and the previous URL stops working — which is also how a
+link is revoked. A `Draft` invoice becomes `Sent`; a `Cancelled` invoice returns `409`.
+
+### `GET /api/invoices/{id}/payments`
+
+Payment history and the derived financial summary.
+
+```json
+{
+  "summary": {
+    "total": 12980.00, "paid": 3000.00, "outstanding": 9980.00,
+    "currency": "INR", "invoiceStatus": "PartiallyPaid",
+    "canPay": true, "hasPendingPayment": false
+  },
+  "payments": [
+    { "id": "…", "amount": 3000.00, "currency": "INR", "status": "Captured",
+      "provider": "Razorpay", "reference": "pay_…", "orderReference": "order_…",
+      "method": "upi", "paidAt": "2026-09-12T09:20:11Z", "createdAt": "…" }
+  ]
+}
+```
+
+`paid` is summed from captured payments; there is no stored, editable paid column. Payment
+`status` is our own vocabulary — `Created`, `Pending`, `Captured`, `Failed`, `Cancelled` — not the
+provider's.
+
+## Public invoice & payment API (no authentication)
+
+The payment token in the route is the authorization. Unknown, malformed and revoked tokens all
+return the same `404`, so a caller cannot learn whether an invoice exists. A `Draft` invoice is
+also `404`: it has not been issued.
+
+### `GET /api/public/invoices/{token}`
+
+Returns the invoice as a document plus its payment state: `paid`, `outstanding`, `canPay`,
+`hasPendingPayment` and the settled `payments`. Carries no user, business, customer or invoice
+identifier of any kind.
+
+### `POST /api/public/invoices/{token}/create-payment-order`
+
+Registers a provider order for the current outstanding balance. **The request body is empty on
+purpose** — the amount is the server's to decide. Anything sent in the body is ignored.
+
+```json
+{
+  "keyId": "rzp_test_…", "orderId": "order_…", "amount": 998000,
+  "currency": "INR", "invoiceNumber": "INV-000001",
+  "businessName": "ABC Electricals", "customerName": "John Smith", "…": "…"
+}
+```
+
+`amount` is in minor units (paise), converted from the decimal total with `decimal` arithmetic
+only. Repeated calls within 15 minutes for the same unchanged balance return the **same** order,
+so a double-click, a refresh and a second tab converge on one payment attempt. Returns `409` when
+the invoice is a draft, cancelled or already settled, and `502` when the provider is unreachable.
+
+### `POST /api/public/invoices/{token}/verify-payment`
+
+```json
+{ "razorpayPaymentId": "pay_…", "razorpayOrderId": "order_…", "razorpaySignature": "…" }
+```
+
+The server checks that the order belongs to this invoice, verifies the HMAC signature, then asks
+the provider what actually happened rather than trusting the callback. Returns the authoritative
+balance:
+
+```json
+{
+  "success": true, "paymentStatus": "Captured", "invoiceStatus": "Paid",
+  "total": 12980.00, "paid": 12980.00, "outstanding": 0.00,
+  "amountPaid": 12980.00, "currency": "INR", "paymentReference": "pay_…"
+}
+```
+
+`success` is false for a `Pending` or `Failed` payment, with `message` explaining what to tell the
+customer. Repeating the call is safe: the same provider payment can only be recorded once.
+
+### `GET /api/public/invoices/{token}/pdf`
+
+The same invoice PDF the owner downloads, reached through the payment token.
+
+## Webhooks
+
+### `POST /api/webhooks/razorpay`
+
+Anonymous to the JWT scheme; authenticated by `X-Razorpay-Signature`, an HMAC-SHA256 over the
+**raw request body** using the webhook secret. Handles `payment.authorized`, `payment.captured`,
+`payment.failed` and `order.paid`.
+
+`X-Razorpay-Event-Id` is persisted under a unique index, so a redelivery is acknowledged without
+being applied twice. Responses are deliberately terse — `{ "status": "ok" }` or
+`{ "status": "rejected" }` with `400` — and never describe internal state.
+
 ## Public quotation API (no authentication)
 
 These endpoints are anonymous by design. The share token in the path **is** the authorization: it

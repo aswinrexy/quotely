@@ -68,6 +68,14 @@ public record InvoiceDto
 
     public IReadOnlyList<InvoiceItemDto> Items { get; init; } = Array.Empty<InvoiceItemDto>();
 
+    // ---- payments (V2.3) ----
+    /// <summary>Summed from captured payments; never a stored, editable figure.</summary>
+    public decimal Paid { get; init; }
+    public decimal Outstanding { get; init; }
+    /// <summary>Whether a payment link is currently active. The URL itself cannot be shown again.</summary>
+    public bool HasPublicLink { get; init; }
+    public DateTime? PublicLinkCreatedAt { get; init; }
+
     public DateTime CreatedAt { get; init; }
     public DateTime UpdatedAt { get; init; }
 }

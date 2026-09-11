@@ -53,7 +53,10 @@ AppUser (Identity)
  │      └── Invoice        (1:1, optional, restrict delete)
  └── Invoice           (1:N)
         ├── Customer       (N:1, restrict delete — navigation only)
-        └── InvoiceItem    (1:N, cascade delete)
+        ├── InvoiceItem    (1:N, cascade delete)
+        └── Payment        (1:N, cascade delete)
+
+WebhookEvent          (standalone — provider event idempotency)
 ```
 
 `Quotations` additionally carries the V2.1 share-link columns — `PublicTokenHash` (unique),
@@ -81,6 +84,12 @@ Indexes:
 | Invoices | `(UserId, Status)` | status filter |
 | Invoices | `QuotationId` unique | one invoice per quotation, enforced by the database |
 | InvoiceItems | `InvoiceId` | item loading |
+| Invoices | `PublicTokenHash` unique, filtered | payment-link lookup |
+| Payments | `ProviderPaymentId` unique, filtered | one provider payment, one record — enforced by the database |
+| Payments | `ProviderOrderId` | order lookup; not unique, because an order may be retried |
+| Payments | `InvoiceId`, `(InvoiceId, Status)` | summing captured payments |
+| Payments | `(UserId, CreatedAt)` | tenant-scoped history |
+| WebhookEvents | `(Provider, EventId)` unique | webhook idempotency |
 
 Money uses `decimal(18,2)`, quantities `decimal(18,3)` and tax rates `decimal(5,2)`. No monetary
 value is ever a `float` or `double`, in the database or in C#.
@@ -255,6 +264,60 @@ payments" in one place. `Paid` and `PartiallyPaid` invoices also refuse deletion
 set. Nothing runs in the background and no second expiry mechanism exists.
 
 Not built for V2.2, by instruction: payments, part-payments and receipts — V2.3.
+
+## Payments (V2.3)
+
+An invoice can be shared as a payment link and settled online through Razorpay.
+
+```
+Invoice (Sent / PartiallyPaid / Overdue)
+      │  POST /api/invoices/{id}/public-link
+      ▼
+/i/{token}                        ← bearer capability, hash-only storage
+      │  POST …/create-payment-order   (no amount in the request)
+      ▼
+Razorpay order, priced by the server
+      │
+      ├── checkout → …/verify-payment ──┐
+      │                                  ├──►  IPaymentService.ProcessOutcomeAsync
+      └── webhook → /api/webhooks/razorpay ─┘        (the only route into the ledger)
+                                                              │
+                                                              ▼
+                                             Payment rows → paid / outstanding → status
+```
+
+**One path into the ledger.** Checkout verification and webhook processing both reduce a provider
+event to a `PaymentOutcome` and call `ProcessOutcomeAsync`. Neither does arithmetic of its own, so
+there is no second payment state machine that can disagree with the first.
+
+**The browser is never the source of truth.** The create-order endpoint takes no amount; the
+server computes `total − captured` itself. Checkout's callback is only a claim: the signature is
+verified, the order is confirmed to belong to *this* invoice, and then the provider is asked what
+actually happened before anything is recorded.
+
+**Idempotency is a database constraint, not a check.** `Payments.ProviderPaymentId` is uniquely
+indexed, so a webhook and a checkout callback racing each other end with one row — the loser
+re-reads the winner's result. `WebhookEvents(Provider, EventId)` does the same for redeliveries.
+
+**Ordering is not assumed.** Razorpay does not guarantee webhook order, so `PaymentStatus` is
+ranked and an incoming state may only be applied if it is at least as authoritative. A late
+`payment.authorized` cannot demote a captured payment.
+
+**Money stays decimal.** Amounts are `decimal(18,2)` throughout; conversion to paise is
+`decimal.Round(amount * 100m, 0, AwayFromZero)`. No `double` touches a monetary value at any point.
+
+**Paid is derived, never stored.** `paid = SUM(Payment.Amount WHERE Status = Captured)`, computed
+on read. Only `Captured` counts — an authorised-but-uncaptured payment is money the business does
+not have yet. Invoice status follows the balance, but only once money has actually arrived: an
+invoice with no payments keeps whatever status its owner set, so V2.2's manual lifecycle is intact.
+
+**Provider isolation.** `IPaymentProvider` is the seam. Razorpay's REST calls, both HMAC schemes
+and its status vocabulary live in `RazorpayPaymentProvider`; nothing outside `Payments/` knows what
+a Razorpay response looks like. The test suite substitutes a fake implementation and never touches
+the network.
+
+Not built for V2.3, by instruction: refunds, subscriptions, manual payment entry, and any second
+provider.
 
 ## Extension points left open for V2
 

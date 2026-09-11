@@ -197,8 +197,14 @@ public class InvoiceService : IInvoiceService
     {
         var invoice = await LoadAsync(userId, id, tracking: false, ct);
         var business = await _db.BusinessProfiles.AsNoTracking().FirstOrDefaultAsync(b => b.UserId == userId, ct);
-        return Map(invoice, business, Today);
+        return Map(invoice, business, Today, await CapturedTotalAsync(id, ct));
     }
+
+    /// <summary>The paid amount is always the sum of captured payments, never a stored column.</summary>
+    private async Task<decimal> CapturedTotalAsync(Guid invoiceId, CancellationToken ct) =>
+        await _db.Payments.AsNoTracking()
+            .Where(p => p.InvoiceId == invoiceId && p.Status == PaymentStatus.Captured)
+            .SumAsync(p => (decimal?)p.Amount, ct) ?? 0m;
 
     public async Task<Invoice> GetEntityForPdfAsync(Guid userId, Guid id, CancellationToken ct = default)
         => await LoadAsync(userId, id, tracking: false, ct);
@@ -337,7 +343,7 @@ public class InvoiceService : IInvoiceService
             .Select(b => b.Currency)
             .FirstOrDefaultAsync(ct) ?? "INR";
 
-    public static InvoiceDto Map(Invoice invoice, BusinessProfile? business, DateOnly today) => new()
+    public static InvoiceDto Map(Invoice invoice, BusinessProfile? business, DateOnly today, decimal paid = 0m) => new()
     {
         Id = invoice.Id,
         InvoiceNumber = invoice.InvoiceNumber,
@@ -398,6 +404,10 @@ public class InvoiceService : IInvoiceService
             LineTax = i.LineTax,
             LineTotal = i.LineTotal
         }).ToList(),
+        Paid = paid,
+        Outstanding = Math.Max(0m, invoice.GrandTotal - paid),
+        HasPublicLink = invoice.PublicTokenHash is not null,
+        PublicLinkCreatedAt = invoice.PublicLinkCreatedAt,
         CreatedAt = invoice.CreatedAt,
         UpdatedAt = invoice.UpdatedAt
     };

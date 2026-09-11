@@ -48,8 +48,9 @@ public class ExceptionHandlingMiddleware
     }
 
     /// <summary>
-    /// Public share tokens appear in the URL, so the path must never reach the log verbatim:
-    /// a log reader would otherwise hold working links to customers' quotations.
+    /// Public share and payment tokens appear in the URL, so the path must never reach the log
+    /// verbatim: a log reader would otherwise hold working links to customers' quotations and
+    /// invoices — the latter being links that can take a payment.
     /// </summary>
     private static string Redact(PathString path)
     {
@@ -58,7 +59,7 @@ public class ExceptionHandlingMiddleware
 
         return Regex.Replace(
             value,
-            @"(?<prefix>/api/public/quotations/)(?<token>[^/]+)",
+            @"(?<prefix>/api/public/(?:quotations|invoices)/)(?<token>[^/]+)",
             "${prefix}[redacted]",
             RegexOptions.IgnoreCase);
     }

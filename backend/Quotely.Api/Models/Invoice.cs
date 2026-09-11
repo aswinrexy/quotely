@@ -57,7 +57,14 @@ public class Invoice
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
 
+    // ---- customer-facing payment link (V2.3) ---------------------------
+    // Identical model to the quotation share link: only the SHA-256 hash of the token is
+    // persisted, so the raw URL exists exactly once — in the response that creates it.
+    public string? PublicTokenHash { get; set; }
+    public DateTime? PublicLinkCreatedAt { get; set; }
+
     public ICollection<InvoiceItem> Items { get; set; } = new List<InvoiceItem>();
+    public ICollection<Payment> Payments { get; set; } = new List<Payment>();
 
     /// <summary>
     /// Money is settled or written off: nothing about this invoice may change any more.
@@ -73,4 +80,12 @@ public class Invoice
 
     /// <summary>Display hint only — the stored status stays authoritative.</summary>
     public bool IsOverdue(DateOnly today) => !IsLocked && DueDate < today;
+
+    /// <summary>
+    /// Whether a customer holding the public link may start a payment. A draft has not been
+    /// issued, a cancelled invoice is void, and a settled one has nothing left to collect.
+    /// The outstanding balance is checked separately, against recorded payments.
+    /// </summary>
+    public bool AcceptsPayments =>
+        Status is InvoiceStatus.Sent or InvoiceStatus.PartiallyPaid or InvoiceStatus.Overdue;
 }

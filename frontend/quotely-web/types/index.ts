@@ -308,6 +308,11 @@ export interface Invoice {
   canEdit: boolean;
   canEditItems: boolean;
   canDelete: boolean;
+  /** Summed from captured payments by the server; never computed in the browser. */
+  paid: number;
+  outstanding: number;
+  hasPublicLink: boolean;
+  publicLinkCreatedAt?: string | null;
   notes?: string | null;
   terms?: string | null;
   subtotal: number;
@@ -338,4 +343,115 @@ export interface SaveInvoiceRequest {
   terms?: string | null;
   /** Only accepted while the invoice is a draft; omitted otherwise. */
   items?: SaveInvoiceItemRequest[];
+}
+
+// ---- V2.3 payments ----------------------------------------------------
+
+export type PaymentStatus = "Created" | "Pending" | "Captured" | "Failed" | "Cancelled";
+
+export interface PaymentSummary {
+  total: number;
+  paid: number;
+  outstanding: number;
+  currency: string;
+  invoiceStatus: InvoiceStatus;
+  canPay: boolean;
+  hasPendingPayment: boolean;
+}
+
+export interface Payment {
+  id: string;
+  amount: number;
+  currency: string;
+  status: PaymentStatus;
+  provider: string;
+  reference?: string | null;
+  orderReference?: string | null;
+  method?: string | null;
+  failureReason?: string | null;
+  paidAt?: string | null;
+  createdAt: string;
+}
+
+export interface InvoicePayments {
+  summary: PaymentSummary;
+  payments: Payment[];
+}
+
+export interface PublicInvoiceLink {
+  url: string;
+  createdAt: string;
+}
+
+export interface PublicInvoiceItem {
+  name: string;
+  description?: string | null;
+  unit: string;
+  quantity: number;
+  unitPrice: number;
+  discount: number;
+  taxRate: number;
+  lineTotal: number;
+}
+
+export interface PublicPayment {
+  amount: number;
+  method?: string | null;
+  reference?: string | null;
+  paidAt?: string | null;
+}
+
+/** Mirrors PublicInvoiceDto: no internal identifiers of any kind. */
+export interface PublicInvoice {
+  invoiceNumber: string;
+  invoiceDate: string;
+  dueDate: string;
+  business: PublicQuotationBusiness;
+  customer: PublicQuotationCustomer;
+  items: PublicInvoiceItem[];
+  subtotal: number;
+  discountTotal: number;
+  taxTotal: number;
+  grandTotal: number;
+  currency: string;
+  notes?: string | null;
+  terms?: string | null;
+  status: InvoiceStatus;
+  isOverdue: boolean;
+  paid: number;
+  outstanding: number;
+  canPay: boolean;
+  hasPendingPayment: boolean;
+  payments: PublicPayment[];
+}
+
+/**
+ * Everything the browser needs to open checkout. Note the absence of anything the browser could
+ * tamper with to change what is charged — the amount here was decided by the server.
+ */
+export interface PaymentOrder {
+  keyId: string;
+  orderId: string;
+  /** Minor units (paise), as registered with the provider. */
+  amount: number;
+  currency: string;
+  invoiceNumber: string;
+  businessName: string;
+  customerName?: string | null;
+  customerEmail?: string | null;
+  customerContact?: string | null;
+}
+
+/** The server's verdict. The only thing the page may treat as the truth about a payment. */
+export interface VerifyPaymentResponse {
+  success: boolean;
+  paymentStatus: PaymentStatus;
+  invoiceStatus: InvoiceStatus;
+  total: number;
+  paid: number;
+  outstanding: number;
+  amountPaid: number;
+  currency: string;
+  paymentReference?: string | null;
+  message?: string | null;
 }

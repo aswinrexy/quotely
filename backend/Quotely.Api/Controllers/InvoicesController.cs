@@ -17,13 +17,23 @@ namespace Quotely.Api.Controllers;
 public class InvoicesController : ControllerBase
 {
     private readonly IInvoiceService _invoices;
+    private readonly IPublicInvoiceService _publicInvoices;
+    private readonly IPaymentService _payments;
     private readonly IPdfService _pdf;
     private readonly AppDbContext _db;
     private readonly ICurrentUser _currentUser;
 
-    public InvoicesController(IInvoiceService invoices, IPdfService pdf, AppDbContext db, ICurrentUser currentUser)
+    public InvoicesController(
+        IInvoiceService invoices,
+        IPublicInvoiceService publicInvoices,
+        IPaymentService payments,
+        IPdfService pdf,
+        AppDbContext db,
+        ICurrentUser currentUser)
     {
         _invoices = invoices;
+        _publicInvoices = publicInvoices;
+        _payments = payments;
         _pdf = pdf;
         _db = db;
         _currentUser = currentUser;
@@ -49,6 +59,22 @@ public class InvoicesController : ControllerBase
         await _invoices.DeleteAsync(_currentUser.Id, id, ct);
         return NoContent();
     }
+
+    /// <summary>
+    /// Creates the customer-facing payment link for one of the caller's own invoices and returns
+    /// the full URL. Only a hash is stored, so this response is the one and only time the URL
+    /// exists — calling again issues a fresh link and retires the previous one.
+    /// </summary>
+    [HttpPost("{id:guid}/public-link")]
+    [ProducesResponseType(typeof(PublicInvoiceLinkDto), StatusCodes.Status200OK)]
+    public async Task<ActionResult<PublicInvoiceLinkDto>> CreatePublicLink(Guid id, CancellationToken ct)
+        => Ok(await _publicInvoices.CreateLinkAsync(_currentUser.Id, id, ct));
+
+    /// <summary>Payment history and the derived financial summary for one of the caller's invoices.</summary>
+    [HttpGet("{id:guid}/payments")]
+    [ProducesResponseType(typeof(InvoicePaymentsDto), StatusCodes.Status200OK)]
+    public async Task<ActionResult<InvoicePaymentsDto>> Payments(Guid id, CancellationToken ct)
+        => Ok(await _payments.GetInvoicePaymentsAsync(_currentUser.Id, id, ct));
 
     /// <summary>Renders the stored snapshot. Nothing is read from the live catalogue.</summary>
     [HttpPost("{id:guid}/pdf")]
