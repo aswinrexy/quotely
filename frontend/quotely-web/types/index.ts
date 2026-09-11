@@ -291,13 +291,15 @@ export interface InvoiceListItem {
   grandTotal: number;
   currency: string;
   isOverdue: boolean;
+  /** The source quotation's number, or empty when the invoice was raised directly. */
   quotationNumber: string;
 }
 
 export interface Invoice {
   id: string;
   invoiceNumber: string;
-  quotationId: string;
+  /** Null for an invoice raised directly — the only thing separating the two creation paths. */
+  quotationId?: string | null;
   quotationNumber: string;
   customer: InvoiceCustomer;
   business?: BusinessProfile | null;
@@ -333,6 +335,17 @@ export interface SaveInvoiceItemRequest {
   unitPrice: number;
   discount: number;
   taxRate: number;
+}
+
+/** V2.4 — direct creation. Totals and the invoice number are the server's to decide. */
+export interface CreateInvoiceRequest {
+  customerId: string;
+  invoiceDate: string;
+  /** Optional; the server defaults it to the invoice date plus the standard payment term. */
+  dueDate?: string | null;
+  notes?: string | null;
+  terms?: string | null;
+  items: SaveInvoiceItemRequest[];
 }
 
 export interface SaveInvoiceRequest {
@@ -383,6 +396,23 @@ export interface InvoicePayments {
 export interface PublicInvoiceLink {
   url: string;
   createdAt: string;
+  /** Ready-made share material, composed server-side while the URL still exists. */
+  share: InvoiceShare;
+}
+
+/**
+ * Deep links for handing an invoice to a customer (V2.4). Quotely sends nothing: these open
+ * WhatsApp and the owner's own mail client with the message already written.
+ */
+export interface InvoiceShare {
+  url: string;
+  message: string;
+  emailSubject: string;
+  whatsAppUrl: string;
+  mailtoUrl: string;
+  /** Null when the customer snapshot holds no usable number / email. */
+  customerPhone?: string | null;
+  customerEmail?: string | null;
 }
 
 export interface PublicInvoiceItem {

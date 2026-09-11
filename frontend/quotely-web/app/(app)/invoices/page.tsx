@@ -92,7 +92,15 @@ export default function InvoicesPage() {
     <>
       <PageHeader
         title="Invoices"
-        description="Track what you've billed and what's been settled."
+        description="Bill a customer directly, or raise one from an accepted quotation."
+        action={
+          <Link href="/invoices/new">
+            <Button>
+              <Icon.plus className="h-4 w-4" />
+              Create invoice
+            </Button>
+          </Link>
+        }
       />
 
       <Card>
@@ -131,13 +139,21 @@ export default function InvoicesPage() {
             description={
               filtered
                 ? "Try a different search term or status filter."
-                : "Invoices are raised from accepted quotations. Open an accepted quotation to convert it."
+                : "Create an invoice for a customer, or convert an accepted quotation into one."
             }
             action={
               !filtered && (
-                <Link href="/quotations?status=Accepted">
-                  <Button variant="secondary">View accepted quotations</Button>
-                </Link>
+                <div className="flex flex-wrap justify-center gap-2">
+                  <Link href="/invoices/new">
+                    <Button>
+                      <Icon.plus className="h-4 w-4" />
+                      Create invoice
+                    </Button>
+                  </Link>
+                  <Link href="/quotations?status=Accepted">
+                    <Button variant="secondary">View accepted quotations</Button>
+                  </Link>
+                </div>
               )
             }
           />
@@ -166,7 +182,9 @@ export default function InvoicesPage() {
                         >
                           <Mono>{invoice.invoiceNumber}</Mono>
                         </Link>
-                        <p className="mt-0.5 text-caption text-fog">from {invoice.quotationNumber}</p>
+                        <p className="mt-0.5 text-caption text-fog">
+                          {invoice.quotationNumber ? `from ${invoice.quotationNumber}` : "Direct invoice"}
+                        </p>
                       </Td>
                       <Td className="text-charcoal">{invoice.customerName}</Td>
                       <Td>{formatDate(invoice.invoiceDate)}</Td>
@@ -217,7 +235,9 @@ export default function InvoicesPage() {
                       >
                         <Mono>{invoice.invoiceNumber}</Mono>
                       </Link>
-                      <p className="mt-0.5 text-caption text-fog">from {invoice.quotationNumber}</p>
+                      <p className="mt-0.5 text-caption text-fog">
+                        {invoice.quotationNumber ? `from ${invoice.quotationNumber}` : "Direct invoice"}
+                      </p>
                     </div>
                     <InvoiceStatusBadge status={invoice.status} />
                   </div>

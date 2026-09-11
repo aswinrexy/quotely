@@ -30,6 +30,7 @@ public record InvoiceListItemDto
     public string Currency { get; init; } = "INR";
     /// <summary>Past its due date and neither paid nor cancelled. Display hint only.</summary>
     public bool IsOverdue { get; init; }
+    /// <summary>The source quotation's number, or empty when the invoice was raised directly.</summary>
     public string QuotationNumber { get; init; } = string.Empty;
 }
 
@@ -38,8 +39,11 @@ public record InvoiceDto
     public Guid Id { get; init; }
     public string InvoiceNumber { get; init; } = string.Empty;
 
-    /// <summary>The quotation this invoice came from, so the owner can navigate back.</summary>
-    public Guid QuotationId { get; init; }
+    /// <summary>
+    /// The quotation this invoice came from, so the owner can navigate back. Null for an invoice
+    /// raised directly — the only thing that distinguishes the two creation paths.
+    /// </summary>
+    public Guid? QuotationId { get; init; }
     public string QuotationNumber { get; init; } = string.Empty;
 
     /// <summary>Billing details as they stood when the invoice was raised.</summary>
@@ -137,4 +141,30 @@ public record SaveInvoiceRequest
 
     /// <summary>Optional. Only accepted while the invoice is still a draft.</summary>
     public List<SaveInvoiceItemRequest>? Items { get; init; }
+}
+
+/// <summary>
+/// Direct invoice creation (V2.4): billing a customer without quoting them first. The result is an
+/// ordinary invoice — same entity, same numbering, same lifecycle, same payment flow.
+///
+/// As with every other money-bearing payload, nothing financial is accepted from the client beyond
+/// the line inputs: the number is allocated server-side and the totals are computed from the lines.
+/// </summary>
+public record CreateInvoiceRequest
+{
+    /// <summary>Must be one of the caller's own customers; anything else is a 404.</summary>
+    [Required]
+    public Guid CustomerId { get; init; }
+
+    [Required]
+    public DateOnly InvoiceDate { get; init; }
+
+    /// <summary>Optional. Defaults to the invoice date plus the standard payment term.</summary>
+    public DateOnly? DueDate { get; init; }
+
+    [MaxLength(2000)] public string? Notes { get; init; }
+    [MaxLength(4000)] public string? Terms { get; init; }
+
+    [Required, MinLength(1)]
+    public List<SaveInvoiceItemRequest> Items { get; init; } = new();
 }

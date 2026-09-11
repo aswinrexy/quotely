@@ -98,6 +98,19 @@ export const Icon = {
       <path d="M15 6V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h1" />
     </Svg>
   ),
+  mail: (p: IconProps) => (
+    <Svg {...p}>
+      <rect x="3" y="5" width="18" height="14" rx="2" />
+      <path d="m3.5 7 8.5 6 8.5-6" />
+    </Svg>
+  ),
+  // WhatsApp's handset-in-a-speech-bubble, drawn in the same outline weight as the rest.
+  whatsapp: (p: IconProps) => (
+    <Svg {...p}>
+      <path d="M20.5 11.8a8.5 8.5 0 0 1-12.6 7.4L3.5 20.5l1.4-4.3A8.5 8.5 0 1 1 20.5 11.8Z" />
+      <path d="M9.2 8.6c.3-.1.6 0 .8.3l.8 1.3c.1.3.1.6-.1.8l-.4.5c.5 1 1.3 1.8 2.3 2.3l.5-.4c.2-.2.5-.2.8-.1l1.3.8c.3.2.4.5.3.8-.2.7-.9 1.2-1.7 1.1-2.6-.3-4.9-2.6-5.2-5.2-.1-.8.4-1.5 1.1-1.7Z" />
+    </Svg>
+  ),
   external: (p: IconProps) => (
     <Svg {...p}>
       <path d="M14 4h6v6M20 4l-8.5 8.5" />

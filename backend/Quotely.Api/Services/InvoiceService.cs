@@ -11,6 +11,7 @@ public interface IInvoiceService
     Task<PagedResult<InvoiceListItemDto>> ListAsync(Guid userId, string? search, string? status, int page, int pageSize, CancellationToken ct = default);
     Task<InvoiceDto> GetAsync(Guid userId, Guid id, CancellationToken ct = default);
     Task<InvoiceDto> ConvertFromQuotationAsync(Guid userId, Guid quotationId, CancellationToken ct = default);
+    Task<InvoiceDto> CreateAsync(Guid userId, CreateInvoiceRequest request, CancellationToken ct = default);
     Task<InvoiceDto> UpdateAsync(Guid userId, Guid id, SaveInvoiceRequest request, CancellationToken ct = default);
     Task DeleteAsync(Guid userId, Guid id, CancellationToken ct = default);
     Task<Invoice> GetEntityForPdfAsync(Guid userId, Guid id, CancellationToken ct = default);
@@ -73,17 +74,10 @@ public class InvoiceService : IInvoiceService
             Currency = currency,
             Notes = quotation.Notes,
             Terms = quotation.Terms,
-            // Billing snapshot: the customer row may be edited or renamed after this point.
-            CustomerName = quotation.Customer!.Name,
-            CustomerCompanyName = quotation.Customer.CompanyName,
-            CustomerEmail = quotation.Customer.Email,
-            CustomerPhone = quotation.Customer.Phone,
-            CustomerAddressLine = quotation.Customer.AddressLine,
-            CustomerCity = quotation.Customer.City,
-            CustomerState = quotation.Customer.State,
-            CustomerPostalCode = quotation.Customer.PostalCode,
-            CustomerCountry = quotation.Customer.Country
         };
+
+        // Billing snapshot: the customer row may be edited or renamed after this point.
+        ApplyCustomerSnapshot(invoice, quotation.Customer!);
 
         var order = 0;
         foreach (var line in quotation.Items.OrderBy(i => i.SortOrder))
@@ -114,19 +108,81 @@ public class InvoiceService : IInvoiceService
 
         // Number allocation and the write share one transaction: a failure anywhere leaves the
         // quotation untouched and no half-built invoice behind.
-        var strategy = _db.Database.CreateExecutionStrategy();
-        await strategy.ExecuteAsync(async () =>
+        await NumberAndInsertAsync(userId, invoice, ct);
+
+        return await GetAsync(userId, invoice.Id, ct);
+    }
+
+    // ---- direct creation (V2.4) ----------------------------------------
+
+    /// <summary>
+    /// Bills a customer without quoting them first. What comes out is an ordinary invoice — the
+    /// same entity, the same numbering sequence, the same Draft-to-Paid lifecycle and the same
+    /// payment link — distinguished only by having no source quotation.
+    ///
+    /// The client supplies line inputs and dates and nothing else: the number is allocated here,
+    /// the billing details are snapshotted here, and the totals are computed here by the same
+    /// calculator a converted invoice uses.
+    /// </summary>
+    public async Task<InvoiceDto> CreateAsync(Guid userId, CreateInvoiceRequest request, CancellationToken ct = default)
+    {
+        if (request.Items is null || request.Items.Count == 0)
+            throw ApiException.BadRequest("An invoice needs at least one item.");
+
+        ValidateItems(request.Items);
+
+        // Ownership first. Another tenant's customer is a 404, exactly as an unknown id would be,
+        // so a caller cannot discover whether a given customer exists.
+        var customer = await _db.Customers.AsNoTracking()
+            .FirstOrDefaultAsync(c => c.Id == request.CustomerId && c.UserId == userId, ct)
+            ?? throw ApiException.NotFound("Customer");
+
+        var invoiceDate = request.InvoiceDate;
+        var dueDate = request.DueDate ?? invoiceDate.AddDays(DefaultPaymentTermDays);
+
+        if (dueDate < invoiceDate)
+            throw ApiException.BadRequest("Due date must be on or after the invoice date.");
+
+        var invoiceId = Guid.NewGuid();
+        var invoice = new Invoice
         {
-            await using var transaction = await _db.Database.BeginTransactionAsync(ct);
+            Id = invoiceId,
+            UserId = userId,
+            // No quotation: this is what makes it a direct invoice. Nothing else differs.
+            QuotationId = null,
+            CustomerId = customer.Id,
+            InvoiceDate = invoiceDate,
+            DueDate = dueDate,
+            // Draft until the owner shares it, matching how a converted invoice starts out.
+            Status = InvoiceStatus.Draft,
+            Currency = await GetCurrencyAsync(userId, ct),
+            Notes = request.Notes,
+            Terms = request.Terms
+        };
 
-            var sequence = await NextSequenceAsync(userId, ct);
-            invoice.Sequence = sequence;
-            invoice.InvoiceNumber = FormatNumber(sequence);
+        ApplyCustomerSnapshot(invoice, customer);
 
-            _db.Invoices.Add(invoice);
-            await _db.SaveChangesAsync(ct);
-            await transaction.CommitAsync(ct);
-        });
+        var order = 0;
+        foreach (var line in request.Items)
+        {
+            invoice.Items.Add(new InvoiceItem
+            {
+                Id = Guid.NewGuid(),
+                InvoiceId = invoiceId,
+                SortOrder = order++,
+                Name = line.Name.Trim(),
+                Description = line.Description,
+                Unit = string.IsNullOrWhiteSpace(line.Unit) ? "Service" : line.Unit.Trim(),
+                Quantity = line.Quantity,
+                UnitPrice = line.UnitPrice,
+                Discount = line.Discount,
+                TaxRate = line.TaxRate
+            });
+        }
+
+        InvoiceCalculator.ApplyTotals(invoice);
+
+        await NumberAndInsertAsync(userId, invoice, ct);
 
         return await GetAsync(userId, invoice.Id, ct);
     }
@@ -149,7 +205,8 @@ public class InvoiceService : IInvoiceService
                 i.InvoiceNumber.Contains(term) ||
                 i.CustomerName.Contains(term) ||
                 i.CustomerCompanyName!.Contains(term) ||
-                i.Quotation!.QuotationNumber.Contains(term));
+                // Left join since V2.4: a directly raised invoice has no quotation to match on.
+                (i.Quotation != null && i.Quotation.QuotationNumber.Contains(term)));
         }
 
         if (!string.IsNullOrWhiteSpace(status) && Enum.TryParse<InvoiceStatus>(status, true, out var parsed))
@@ -172,7 +229,7 @@ public class InvoiceService : IInvoiceService
                 i.Status,
                 i.GrandTotal,
                 i.Currency,
-                QuotationNumber = i.Quotation!.QuotationNumber
+                QuotationNumber = i.Quotation != null ? i.Quotation.QuotationNumber : null
             })
             .ToListAsync(ct);
 
@@ -187,7 +244,7 @@ public class InvoiceService : IInvoiceService
             GrandTotal = i.GrandTotal,
             Currency = i.Currency,
             IsOverdue = i.Status is not (InvoiceStatus.Paid or InvoiceStatus.Cancelled) && i.DueDate < today,
-            QuotationNumber = i.QuotationNumber
+            QuotationNumber = i.QuotationNumber ?? string.Empty
         }).ToList();
 
         return new PagedResult<InvoiceListItemDto>(items, page, pageSize, total);
@@ -282,6 +339,45 @@ public class InvoiceService : IInvoiceService
     }
 
     // ---- helpers -------------------------------------------------------
+
+    /// <summary>
+    /// Freezes the billing details onto the invoice. Both creation paths go through here, so a
+    /// directly raised invoice is exactly as historically accurate as a converted one.
+    /// </summary>
+    private static void ApplyCustomerSnapshot(Invoice invoice, Customer customer)
+    {
+        invoice.CustomerName = customer.Name;
+        invoice.CustomerCompanyName = customer.CompanyName;
+        invoice.CustomerEmail = customer.Email;
+        invoice.CustomerPhone = customer.Phone;
+        invoice.CustomerAddressLine = customer.AddressLine;
+        invoice.CustomerCity = customer.City;
+        invoice.CustomerState = customer.State;
+        invoice.CustomerPostalCode = customer.PostalCode;
+        invoice.CustomerCountry = customer.Country;
+    }
+
+    /// <summary>
+    /// Allocates the next invoice number and writes the invoice in one transaction, so a failure
+    /// anywhere leaves neither a gap in the sequence nor a half-built document. One sequence
+    /// serves both creation paths — there is no second numbering scheme for direct invoices.
+    /// </summary>
+    private async Task NumberAndInsertAsync(Guid userId, Invoice invoice, CancellationToken ct)
+    {
+        var strategy = _db.Database.CreateExecutionStrategy();
+        await strategy.ExecuteAsync(async () =>
+        {
+            await using var transaction = await _db.Database.BeginTransactionAsync(ct);
+
+            var sequence = await NextSequenceAsync(userId, ct);
+            invoice.Sequence = sequence;
+            invoice.InvoiceNumber = FormatNumber(sequence);
+
+            _db.Invoices.Add(invoice);
+            await _db.SaveChangesAsync(ct);
+            await transaction.CommitAsync(ct);
+        });
+    }
 
     private async Task<Invoice> LoadAsync(Guid userId, Guid id, bool tracking, CancellationToken ct)
     {

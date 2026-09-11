@@ -125,7 +125,9 @@ public class AppDbContext : IdentityDbContext<AppUser, IdentityRole<Guid>, Guid>
             e.HasIndex(x => new { x.UserId, x.Sequence }).IsUnique();
             e.HasIndex(x => new { x.UserId, x.Status });
             // One invoice per quotation: enforced in the database, not only in the service, so a
-            // concurrent double conversion cannot slip two invoices through.
+            // concurrent double conversion cannot slip two invoices through. QuotationId is
+            // nullable since V2.4, and EF filters the index to non-null values — directly raised
+            // invoices all carry NULL and so are not in competition with each other.
             e.HasIndex(x => x.QuotationId).IsUnique();
             e.Property(x => x.InvoiceNumber).HasMaxLength(30).IsRequired();
             e.Property(x => x.Currency).HasMaxLength(3).IsRequired();

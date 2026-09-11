@@ -288,14 +288,49 @@ invoice returns `404`.
 | Method | Path | Purpose |
 | ------ | ---- | ------- |
 | `GET` | `/api/invoices` | paged list; `search`, `status`, `page`, `pageSize` |
+| `POST` | `/api/invoices` | raise an invoice directly, without a quotation |
 | `GET` | `/api/invoices/{id}` | one invoice with items |
 | `PUT` | `/api/invoices/{id}` | update dates, status, notes, terms and (draft only) items |
 | `DELETE` | `/api/invoices/{id}` | delete, unless `Paid` or `PartiallyPaid` |
 | `GET`/`POST` | `/api/invoices/{id}/pdf` | render the invoice PDF |
 
 `search` matches the invoice number, the snapshotted customer name or company, and the source
-quotation number. `status` is one of `Draft`, `Sent`, `PartiallyPaid`, `Paid`, `Overdue`,
-`Cancelled`.
+quotation number where there is one. `status` is one of `Draft`, `Sent`, `PartiallyPaid`, `Paid`,
+`Overdue`, `Cancelled`.
+
+### `POST /api/invoices`
+
+Raises an invoice directly, for a customer who was never quoted. Returns `201 Created` with the
+full invoice DTO and a `Location` of `/api/invoices/{id}`.
+
+```json
+{
+  "customerId": "8f1c…",
+  "invoiceDate": "2026-09-12",
+  "dueDate": "2026-09-27",
+  "notes": "Thank you for your business.",
+  "terms": "Payment due by the date shown above.",
+  "items": [
+    { "name": "AC Installation", "description": "Split AC, wall mounted",
+      "unit": "Service", "quantity": 2, "unitPrice": 5000, "discount": 0, "taxRate": 18 }
+  ]
+}
+```
+
+`dueDate` is optional and defaults to the invoice date plus 15 days; a due date before the invoice
+date returns `400`. `customerId` must belong to the caller — anything else returns `404`, the same
+answer an unknown id gets, so a rejected request cannot confirm that a customer exists. At least one
+item is required, and the usual line rules apply (quantity above zero, price and discount not
+negative, tax between 0 and 100).
+
+The invoice number, the totals, the billing snapshot and the status are the server's: the number is
+allocated from the same per-business sequence a converted invoice uses, the totals are computed from
+the submitted lines by the same calculator, and a new invoice is always `Draft`. Any of these sent
+in the body is ignored.
+
+What comes back is an ordinary invoice — same entity, same table, same lifecycle, same PDF, same
+payment link and same Razorpay flow. The only difference is that `quotationId` is `null` and
+`quotationNumber` is empty.
 
 ### Update payload
 
@@ -362,12 +397,36 @@ Content-Disposition: attachment; filename=INV-000001-John-Smith.pdf
 Creates the customer-facing payment link for one of the caller's own invoices.
 
 ```json
-{ "url": "https://quotely.app/i/7f9c2a…", "createdAt": "2026-09-12T09:14:00Z" }
+{
+  "url": "https://quotely.app/i/7f9c2a…",
+  "createdAt": "2026-09-12T09:14:00Z",
+  "share": {
+    "url": "https://quotely.app/i/7f9c2a…",
+    "message": "Hi John,\n\nYour invoice INV-000001 from ABC Electrical is ready.\n\nAmount: ₹12,980.00\nDue date: 20 Sep 2026\n\nView and pay your invoice:\nhttps://quotely.app/i/7f9c2a…\n\nThank you.",
+    "emailSubject": "Invoice INV-000001 from ABC Electrical",
+    "whatsAppUrl": "https://wa.me/919123456780?text=…",
+    "mailtoUrl": "mailto:john%40example.com?subject=…&body=…",
+    "customerPhone": "919123456780",
+    "customerEmail": "john@example.com"
+  }
+}
 ```
 
 Only a SHA-256 hash of the token is stored, so **this response is the one and only time the URL
 exists**. Calling again mints a new token and the previous URL stops working — which is also how a
 link is revoked. A `Draft` invoice becomes `Sent`; a `Cancelled` invoice returns `409`.
+
+`share` (V2.4) is ready-made material for handing the invoice over, composed here because this is
+the only moment the URL exists. **Quotely sends nothing**: `whatsAppUrl` is a `wa.me` deep link and
+`mailtoUrl` opens the owner's own mail client with a draft. There is no WhatsApp Business API, no
+Cloud API, no SMTP, and no email provider anywhere in the codebase.
+
+`message` states the outstanding balance, not the original total, so a part-paid invoice is not
+chased for the full amount. `customerPhone` is null when the billing snapshot holds no usable
+number, and `whatsAppUrl` then carries the message without a recipient so WhatsApp asks the owner to
+choose a contact; `mailtoUrl` behaves the same way when there is no email. The only identifier any
+of this carries is the public invoice URL — never a token on its own, a JWT, or a user, customer,
+invoice or payment id.
 
 ### `GET /api/invoices/{id}/payments`
 

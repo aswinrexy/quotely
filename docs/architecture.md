@@ -51,13 +51,18 @@ AppUser (Identity)
  │      ├── QuotationItem  (1:N, cascade delete)
  │      │      └── Product (N:1, optional, set null on delete)
  │      └── Invoice        (1:1, optional, restrict delete)
- └── Invoice           (1:N)
+ └── Invoice           (1:N)   ← two creation paths, one entity
         ├── Customer       (N:1, restrict delete — navigation only)
         ├── InvoiceItem    (1:N, cascade delete)
         └── Payment        (1:N, cascade delete)
 
 WebhookEvent          (standalone — provider event idempotency)
 ```
+
+An `Invoice` is raised either by converting an accepted quotation (V2.2) or directly, without one
+(V2.4). There is deliberately no `DirectInvoice` type, no origin column and no second table: the
+path is recorded by nothing more than whether `QuotationId` is set, and every downstream
+concern — PDF, public link, payments, list, dashboard — treats the two identically.
 
 `Quotations` additionally carries the V2.1 share-link columns — `PublicTokenHash` (unique),
 `PublicLinkCreatedAt` — and the customer's answer: `RespondedAt`, `RespondedByName`,
@@ -82,7 +87,7 @@ Indexes:
 | Invoices | `(UserId, InvoiceNumber)` unique | numbers unique per business |
 | Invoices | `(UserId, Sequence)` unique | allocation of the next number |
 | Invoices | `(UserId, Status)` | status filter |
-| Invoices | `QuotationId` unique | one invoice per quotation, enforced by the database |
+| Invoices | `QuotationId` unique, filtered | one invoice per quotation, enforced by the database; the filter lets every directly raised invoice hold `NULL` |
 | InvoiceItems | `InvoiceId` | item loading |
 | Invoices | `PublicTokenHash` unique, filtered | payment-link lookup |
 | Payments | `ProviderPaymentId` unique, filtered | one provider payment, one record — enforced by the database |
@@ -93,6 +98,23 @@ Indexes:
 
 Money uses `decimal(18,2)`, quantities `decimal(18,3)` and tax rates `decimal(5,2)`. No monetary
 value is ever a `float` or `double`, in the database or in C#.
+
+## Invoice sharing (V2.4)
+
+`InvoiceShareBuilder` is a pure static class, like the calculators, and for the same reason: it can
+be asserted on directly rather than through a browser. It turns an invoice, a business name, an
+outstanding amount and a public URL into the message a customer receives plus a `wa.me` link and a
+`mailto:` link, percent-encoding both.
+
+It lives server-side because the wording and the figures are the business's own financial
+communication — the amount is what is still outstanding, taken from the same derived summary the
+rest of the system uses — and because the share material can only be composed at the one moment the
+public URL exists, in the response to `POST /api/invoices/{id}/public-link`. The database keeps only
+the token's SHA-256 hash, so there is no later opportunity.
+
+Nothing is sent by Quotely. There is no WhatsApp Business API, no Meta Cloud API, no SMTP client and
+no email provider in the codebase; WhatsApp and the owner's own mail client do the sending. The only
+identifier that appears in any generated URL is the public invoice URL itself.
 
 ## Quotation calculation
 

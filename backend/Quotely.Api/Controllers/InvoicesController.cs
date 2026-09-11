@@ -49,6 +49,21 @@ public class InvoicesController : ControllerBase
     public async Task<ActionResult<InvoiceDto>> Get(Guid id, CancellationToken ct)
         => Ok(await _invoices.GetAsync(_currentUser.Id, id, ct));
 
+    /// <summary>
+    /// Raises an invoice directly, without a quotation (V2.4). The result is an ordinary invoice:
+    /// the same numbering sequence, lifecycle, PDF, payment link and payment flow as one converted
+    /// from a quotation. The customer must belong to the caller.
+    /// </summary>
+    [HttpPost]
+    [ProducesResponseType(typeof(InvoiceDto), StatusCodes.Status201Created)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<InvoiceDto>> Create(CreateInvoiceRequest request, CancellationToken ct)
+    {
+        var created = await _invoices.CreateAsync(_currentUser.Id, request, ct);
+        return CreatedAtAction(nameof(Get), new { id = created.Id }, created);
+    }
+
     [HttpPut("{id:guid}")]
     public async Task<ActionResult<InvoiceDto>> Update(Guid id, SaveInvoiceRequest request, CancellationToken ct)
         => Ok(await _invoices.UpdateAsync(_currentUser.Id, id, request, ct));

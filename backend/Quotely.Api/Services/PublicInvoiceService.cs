@@ -74,7 +74,20 @@ public class PublicInvoiceService : IPublicInvoiceService
 
         _logger.LogInformation("Created public payment link for invoice {InvoiceId}", invoice.Id);
 
-        return new PublicInvoiceLinkDto(BuildUrl(token), invoice.PublicLinkCreatedAt.Value);
+        var url = BuildUrl(token);
+
+        // The share material is composed now, in the same response, because this is the only
+        // moment the URL exists: the database keeps a hash, so it can never be recovered later.
+        var business = await LoadBusinessAsync(invoice.UserId, ct);
+        var summary = await _payments.GetSummaryAsync(invoice.Id, ct);
+        var share = InvoiceShareBuilder.Build(
+            invoice,
+            business?.BusinessName ?? "Your business",
+            // What the customer actually owes. Part-paid invoices must not ask for the full total.
+            summary.Outstanding > 0 ? summary.Outstanding : invoice.GrandTotal,
+            url);
+
+        return new PublicInvoiceLinkDto(url, invoice.PublicLinkCreatedAt.Value, share);
     }
 
     // ---- customer -------------------------------------------------------

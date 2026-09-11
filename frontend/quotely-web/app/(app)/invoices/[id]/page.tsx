@@ -187,14 +187,17 @@ export default function InvoiceDetailPage() {
                 </MetaItem>
                 <MetaItem label="Invoice date">{formatDate(invoice.invoiceDate)}</MetaItem>
                 <MetaItem label="Due date">{formatDate(invoice.dueDate)}</MetaItem>
-                <MetaItem label="Quotation">
-                  <Link
-                    href={`/quotations/${invoice.quotationId}`}
-                    className="text-electric hover:underline"
-                  >
-                    <Mono>{invoice.quotationNumber}</Mono>
-                  </Link>
-                </MetaItem>
+                {/* Only a converted invoice has a quotation to point back to. */}
+                {invoice.quotationId && (
+                  <MetaItem label="Quotation">
+                    <Link
+                      href={`/quotations/${invoice.quotationId}`}
+                      className="text-electric hover:underline"
+                    >
+                      <Mono>{invoice.quotationNumber}</Mono>
+                    </Link>
+                  </MetaItem>
+                )}
               </dl>
             </div>
           </div>
@@ -303,7 +306,11 @@ export default function InvoiceDetailPage() {
       <ConfirmDialog
         open={confirmDelete}
         title="Delete invoice"
-        description={`${invoice.invoiceNumber} will be permanently deleted. Quotation ${invoice.quotationNumber} can then be invoiced again.`}
+        description={
+          invoice.quotationNumber
+            ? `${invoice.invoiceNumber} will be permanently deleted. Quotation ${invoice.quotationNumber} can then be invoiced again.`
+            : `${invoice.invoiceNumber} will be permanently deleted. This cannot be undone.`
+        }
         confirmLabel="Delete invoice"
         loading={deleting}
         onConfirm={remove}

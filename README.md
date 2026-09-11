@@ -204,9 +204,18 @@ for the security model.
 
 ## Invoicing
 
-Once a customer has accepted a quotation, its details page offers **Convert to Invoice**. That
-raises a numbered invoice (`INV-000001`, sequential per business), which then lives under
-**Invoices** with its own list, detail page, edit screen and PDF.
+There are two ways to raise an invoice, and both produce the same document.
+
+**Directly.** **Invoices → Create invoice** bills a customer who was never quoted: pick the
+customer, add lines, set the dates, save. This is the shorter path for work that was never
+quoted — a call-out, a repair, a repeat job.
+
+**From a quotation.** Once a customer has accepted a quotation, its details page offers **Convert
+to Invoice**.
+
+Either way you get a numbered invoice (`INV-000001`, sequential per business, one sequence shared
+by both paths), which lives under **Invoices** with its own list, detail page, edit screen and PDF.
+The list shows where each came from — the source quotation's number, or "Direct invoice".
 
 The invoice is a separate document, not a flag on the quotation. It stores its own copy of the line
 items, the billing details and the currency, so a later change to a product's price or a customer's
@@ -214,12 +223,40 @@ address cannot restate an invoice that has already been issued. A quotation conv
 second attempt reports the existing invoice — and an invoiced quotation cannot be deleted until its
 invoice is.
 
+There is one `Invoice` entity and one `Invoices` table. A directly raised invoice is not a
+different type — it simply has no source quotation, and everything downstream (PDF, public link,
+payments, dashboard) treats the two identically.
+
 Invoice status (`Draft`, `Sent`, `Partially paid`, `Paid`, `Overdue`, `Cancelled`) is separate from
 quotation status. Line items can only be changed while the invoice is a draft; a `Paid` or
 `Cancelled` invoice can no longer be edited, and a `Paid` or partly paid one cannot be deleted. The
 due date defaults to 15 days after the invoice date and is editable while the invoice is a draft.
 
-Payments are not part of this version.
+## Sharing an invoice
+
+An invoice's details page has **Share invoice**. It mints the customer-facing link and offers three
+ways to hand it over:
+
+- **WhatsApp** — opens WhatsApp (the app on a phone, WhatsApp Web on a desktop) with a message
+  already written: the customer's name, the invoice number, your business name, the outstanding
+  amount, the due date and the link.
+- **Email** — opens your own mail client with the same message as a draft, addressed to the
+  customer and with the subject filled in.
+- **Copy link** — copies the URL.
+
+**Quotely does not send anything.** Both actions are deep links that hand the message to WhatsApp
+or to your mail app, with you in the loop; nothing leaves the server. This milestone deliberately
+introduces no WhatsApp Business API, no Meta Cloud API, no SMTP server and no email provider —
+there is nothing to configure, and no delivery to guarantee. Automated sending and reminders are a
+later milestone.
+
+The message and both links are composed server-side, where the authoritative figures are, and the
+amount shown is what is still outstanding rather than the original total. The only identifier any
+of it carries is the public invoice URL.
+
+Sharing a draft issues it (`Draft` becomes `Sent`), the same as before. Because only a hash of the
+token is stored, the URL is shown once: reopening the page later offers **Share again**, which
+mints a new link and immediately retires the old one.
 
 ## Online payments (Razorpay)
 

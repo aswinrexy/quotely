@@ -1,9 +1,12 @@
 namespace Quotely.Api.Models;
 
 /// <summary>
-/// A financial document raised from an accepted quotation. Everything it prints is a snapshot
-/// taken at conversion time, so later edits to the catalogue or the customer record cannot
-/// rewrite an issued invoice.
+/// A financial document demanding payment. Everything it prints is a snapshot taken when it was
+/// raised, so later edits to the catalogue or the customer record cannot rewrite an issued invoice.
+///
+/// There is exactly one invoice entity, reached by two creation paths: conversion from an accepted
+/// quotation (V2.2) and direct creation (V2.4). The path is recorded by nothing more than whether
+/// <see cref="QuotationId"/> is set — a direct invoice needs no separate type, table or origin column.
 /// </summary>
 public class Invoice
 {
@@ -11,8 +14,12 @@ public class Invoice
     public Guid UserId { get; set; }
     public AppUser? User { get; set; }
 
-    /// <summary>The accepted quotation this invoice was raised from. One invoice per quotation.</summary>
-    public Guid QuotationId { get; set; }
+    /// <summary>
+    /// The accepted quotation this invoice was raised from, or null when the owner billed the
+    /// customer directly. Still one invoice per quotation: the unique index is filtered to
+    /// non-null values, so any number of direct invoices may coexist.
+    /// </summary>
+    public Guid? QuotationId { get; set; }
     public Quotation? Quotation { get; set; }
 
     /// <summary>Kept for navigation and filtering only — never as the source of printed details.</summary>
@@ -77,6 +84,9 @@ public class Invoice
     /// gone out, the figures the customer received are history.
     /// </summary>
     public bool AllowsFinancialEdits => Status == InvoiceStatus.Draft;
+
+    /// <summary>Raised directly rather than converted from a quotation. Derived, never stored.</summary>
+    public bool IsDirect => QuotationId is null;
 
     /// <summary>Display hint only — the stored status stays authoritative.</summary>
     public bool IsOverdue(DateOnly today) => !IsLocked && DueDate < today;
