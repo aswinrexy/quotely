@@ -325,14 +325,30 @@ Every push and pull request on `main` and `develop` runs
 and the frontend is typechecked, linted and built. CI needs **no secrets** — the test suite runs
 offline against in-memory SQLite and a stand-in payment provider.
 
-## Branching
+## Branching and releases
 
-`feature/*` → `develop` → `main`. `develop` deploys to DEV/TEST, `main` to UAT and then PROD after
-sign-off. Environments are deployment targets rather than branches; see
-[docs/environments.md](docs/environments.md).
+`feature/*` → pull request → `develop` → `release/vX.Y.Z` → pull request → `main` → tag `vX.Y.Z`.
+
+Branches are source control; environments are deployment targets. `develop` deploys to TEST, a
+release branch to UAT, and a tagged commit on `main` to PROD — so there is deliberately no branch
+per environment.
+
+Before starting any work, enable the local push guard once per clone:
+
+```bash
+git config core.hooksPath .githooks
+```
+
+It refuses a direct push to `main` or `develop`, because GitHub's own branch protection is a paid
+feature for private repositories and this repository is on the Free plan.
+
+**Full guide: [docs/development-workflow.md](docs/development-workflow.md)** — starting a feature,
+opening a pull request, what CI checks, weekly releases, version numbers, hotfixes, and where
+secrets belong.
 
 ## Documentation
 
-- [docs/environments.md](docs/environments.md) — environments, secrets, branching, deployment
+- [docs/development-workflow.md](docs/development-workflow.md) — branches, pull requests, CI, releases, hotfixes
+- [docs/environments.md](docs/environments.md) — environments, secrets, configuration, migrations
 - [docs/architecture.md](docs/architecture.md) — structure, data model, request flow, security
 - [docs/api.md](docs/api.md) — endpoint reference with payloads
