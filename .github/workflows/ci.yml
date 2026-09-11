@@ -9,10 +9,16 @@ name: CI
 
 on:
   push:
-    branches: [main, develop]
+    # Long-lived branches, plus the short-lived branches that carry a release or an
+    # emergency fix — those must be green before their pull request is even opened.
+    branches: [main, develop, 'release/**', 'hotfix/**']
   pull_request:
+    # Every pull request into a long-lived branch, whatever it is branched from.
     branches: [main, develop]
   workflow_dispatch:
+  # Lets the release workflow re-run this exact pipeline against a tag before
+  # publishing, rather than trusting that the commit was green some time ago.
+  workflow_call:
 
 # Cancel superseded runs on the same branch rather than paying for both.
 concurrency:

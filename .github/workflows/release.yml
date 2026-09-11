@@ -1,0 +1,82 @@
+name: Release
+
+# Publishes a GitHub Release when a version tag is pushed.
+#
+# This workflow DOES NOT DEPLOY ANYTHING. No hosting provider has been selected
+# for Quotely yet, so there is nowhere to deploy to. What it does is mark a
+# commit on main as an identified, validated release — the thing a future
+# deployment would then point at.
+#
+# Cutting a release, once the release pull request is merged into main:
+#
+#     git switch main && git pull
+#     git tag -a v2.5.0 -m "v2.5.0 — manual payments"
+#     git push origin v2.5.0
+#
+# Version numbers are chosen deliberately by a person, never generated here.
+# See docs/development-workflow.md.
+
+on:
+  push:
+    tags:
+      - 'v[0-9]+.[0-9]+.[0-9]+'
+      # Pre-releases such as v2.5.0-rc.1 are matched too, and marked as
+      # pre-releases on GitHub rather than as the latest version.
+      - 'v[0-9]+.[0-9]+.[0-9]+-*'
+
+permissions:
+  contents: read
+
+jobs:
+  # A tag can be placed on any commit, including one that was never green.
+  # Re-running the full pipeline against the tagged tree is what makes the
+  # published release trustworthy rather than merely labelled.
+  validate:
+    name: Validate
+    uses: ./.github/workflows/ci.yml
+
+  publish:
+    name: Publish GitHub Release
+    needs: validate
+    runs-on: ubuntu-latest
+    permissions:
+      # The only elevated permission here, and the narrowest that can create a release.
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # Full history so the generated notes can describe what changed.
+          fetch-depth: 0
+
+      - name: Confirm the tag is on main
+        # A release must be something main actually contains. A tag pushed from a
+        # feature branch by mistake is caught here rather than published.
+        run: |
+          git fetch origin main
+          if git merge-base --is-ancestor "${GITHUB_SHA}" FETCH_HEAD; then
+            echo "✓ ${GITHUB_REF_NAME} (${GITHUB_SHA}) is contained in main."
+          else
+            echo "✖ ${GITHUB_REF_NAME} points at a commit that is not on main." >&2
+            echo "  Releases are cut from main. Merge the release pull request first," >&2
+            echo "  then tag the merge commit. See docs/development-workflow.md." >&2
+            exit 1
+          fi
+
+      - name: Create the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          # Anything with a suffix after the patch number (-rc.1, -beta) is a
+          # pre-release and must not be presented as the current version.
+          if [[ "$TAG" == *-* ]]; then
+            PRERELEASE="--prerelease"
+          else
+            PRERELEASE="--latest"
+          fi
+
+          gh release create "$TAG" \
+            --title "$TAG" \
+            --generate-notes \
+            $PRERELEASE \
+            --verify-tag

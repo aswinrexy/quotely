@@ -1,0 +1,51 @@
+#!/bin/sh
+#
+# Refuses a direct push to a protected branch.
+#
+# GitHub's own branch protection is a paid feature for private repositories, and
+# Quotely is on the Free plan (see docs/development-workflow.md). This hook is the
+# stand-in: it cannot stop someone pushing from another machine, but it does stop
+# the mistake that actually happens — a tired `git push` on the wrong branch.
+#
+# Enable it once per clone:
+#     git config core.hooksPath .githooks
+#
+# Emergency override, when you genuinely mean it:
+#     ALLOW_DIRECT_PUSH=1 git push origin main
+
+PROTECTED="main develop"
+
+# Each line on stdin: <local ref> <local sha> <remote ref> <remote sha>
+while read -r _local_ref _local_sha remote_ref _remote_sha; do
+    # Tags are pushed directly by design — that is how a release is cut.
+    case "$remote_ref" in
+        refs/tags/*) continue ;;
+    esac
+
+    branch=${remote_ref#refs/heads/}
+
+    for protected in $PROTECTED; do
+        if [ "$branch" = "$protected" ]; then
+            if [ "$ALLOW_DIRECT_PUSH" = "1" ]; then
+                echo "pre-push: ALLOW_DIRECT_PUSH=1 — permitting direct push to '$branch'." >&2
+                continue
+            fi
+
+            echo "" >&2
+            echo "  ✖ Direct push to '$branch' is blocked." >&2
+            echo "" >&2
+            echo "  Quotely changes reach $branch through a pull request, so CI runs first." >&2
+            echo "" >&2
+            echo "    git switch -c feature/<short-name>" >&2
+            echo "    git push -u origin feature/<short-name>" >&2
+            echo "    gh pr create --base develop" >&2
+            echo "" >&2
+            echo "  See docs/development-workflow.md." >&2
+            echo "  Override only if you mean it:  ALLOW_DIRECT_PUSH=1 git push ..." >&2
+            echo "" >&2
+            exit 1
+        fi
+    done
+done
+
+exit 0
