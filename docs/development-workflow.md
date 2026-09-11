@@ -155,6 +155,12 @@ CI runs on the push. This branch is what UAT deploys, once UAT exists.
 gh pr create --base main --title "Release v2.5.0" --fill
 ```
 
+> ⚠️ **Always open this from a `release/*` branch, never from `develop` itself.** This repository
+> has `delete_branch_on_merge` enabled, which deletes a pull request's head branch once it merges.
+> Point a pull request from `develop` straight at `main` and GitHub will delete `develop` when you
+> merge it. (Ask how this warning came to be written.) A `release/*` branch is disposable, which is
+> exactly what you want the head of a release pull request to be.
+
 **3. Review it properly.** This is the moment to read the whole diff since the last release —
 `git log --oneline v2.4.0..release/v2.5.0` — and ask what could go wrong in production. Check
 whether it contains an EF migration.
@@ -176,16 +182,19 @@ Pushing the tag triggers `.github/workflows/release.yml`, which re-runs the full
 against the tagged tree, confirms the tag is actually on `main`, and publishes a GitHub Release
 with generated notes. **It does not deploy.**
 
-**7. Merge main back into develop**, if the release branch gained any commits of its own:
+**7. Merge main back into develop**, so nothing that happened during the release is lost.
+
+This goes through a pull request like everything else — `develop` is covered by the same push
+guard, and a back-merge deserves the same CI run:
 
 ```bash
-git switch develop
-git pull
-git merge main
-git push origin develop
+git switch -c chore/backmerge-v2.5.0 main
+git push -u origin chore/backmerge-v2.5.0
+gh pr create --base develop --title "Back-merge v2.5.0 into develop" --fill
 ```
 
-Skip this if the release branch never changed — there is nothing to bring back.
+Skip it if the release branch never gained commits of its own — there is then nothing to bring
+back.
 
 **8. Delete the release branch.**
 
@@ -226,12 +235,18 @@ Branch from `main`, not `develop` — `develop` may contain unreleased work you 
 production right now.
 
 Then: CI must pass (**never bypass it, however urgent** — that is exactly when mistakes happen),
-merge into `main`, tag a **patch** version (`v2.5.1`), and merge `main` back into `develop` so the
-fix is not lost in the next release:
+merge into `main`, and tag a **patch** version (`v2.5.1`).
+
+Finally, bring the fix back into `develop`, again through a pull request:
 
 ```bash
-git switch develop && git pull && git merge main && git push
+git switch -c chore/backmerge-v2.5.1 main
+git push -u origin chore/backmerge-v2.5.1
+gh pr create --base develop --title "Back-merge v2.5.1 into develop" --fill
 ```
+
+Forgetting this step is the classic hotfix bug: production gets fixed, then the next release
+quietly ships the old broken code over the top.
 
 ---
 
@@ -382,6 +397,11 @@ gh pr create --base main --title "Release v2.5.0" --fill
 git switch main && git pull
 git tag -a v2.5.0 -m "v2.5.0 — <what shipped>"
 git push origin v2.5.0
+
+# bring main back into develop (also via a PR)
+git switch -c chore/backmerge-v2.5.0 main
+git push -u origin chore/backmerge-v2.5.0
+gh pr create --base develop --fill
 
 # enable the local push guard (once per clone)
 git config core.hooksPath .githooks
