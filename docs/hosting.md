@@ -7,7 +7,7 @@ Everything below runs on a free plan, and every free plan has teeth. They are li
 
 | Layer | Platform | Plan | Cost |
 | --- | --- | --- | --- |
-| Frontend (Next.js) | Vercel | Hobby | £0 |
+| Frontend (Next.js) | Vercel | Hobby | £0 — see the caveat below |
 | Backend (ASP.NET Core) | Render | Free web service | £0 |
 | Database (PostgreSQL) | Supabase | Free | £0 |
 | Source + CI | GitHub | Free | £0 |
@@ -15,6 +15,17 @@ Everything below runs on a free plan, and every free plan has teeth. They are li
 
 No custom domain, no paid add-on, no card on file. A domain is worth buying when there is revenue
 to justify it; until then the platform domains are real, HTTPS-terminated URLs that work.
+
+> **Vercel Hobby is licensed for non-commercial personal use only.** Vercel's fair-use guidelines
+> name "any method of requesting or processing payment from visitors of the site" as commercial
+> usage, and Quotely's public invoice page does exactly that. While the deployment is a private
+> MVP in Razorpay TEST mode with no real money moving, it is defensible; the day a real customer
+> pays a real invoice through it, Hobby is the wrong plan and Vercel may pause the project.
+>
+> Two ways out, both still £0: move the frontend to a **Render static site** (same account as the
+> API, free, no commercial-use restriction) or to **Cloudflare Pages** (free, commercial use
+> permitted). The third is to pay for Vercel Pro when there is revenue to pay it with. This is a
+> licensing decision, not a technical one — the Next.js build is identical on all three.
 
 ---
 
@@ -92,14 +103,24 @@ dotnet ef migrations add <Name> --project Quotely.Migrations.PostgreSql --startu
    its own. Two applications sharing a migration history is a mess neither survives.
 2. Region: pick the one nearest your customers (`ap-south-1` for India).
 3. Save the database password when it is shown. It is shown once.
-4. Take the **pooled** connection string — Connect → Connection pooling, port **6543**, not the
-   direct 5432 one. Render's free tier restarts the container on every deploy and after every
-   sleep, and a pooler absorbs that far better than a free Postgres instance's direct connection
-   limit does.
+4. Take the **Session pooler** string: the **Connect** button at the top of the project, then
+   *Session pooler*. Host `aws-<index>-<region>.pooler.supabase.com`, port **5432**, username
+   `postgres.<project-ref>`.
+
+   Not the other two, and the reason matters:
+
+   - **Direct connection** (`db.<project-ref>.supabase.co`) is **IPv6-only** without a paid add-on,
+     and Render's free tier has no IPv6 outbound. It will simply fail to connect.
+   - **Transaction pooler** (port 6543) is built for serverless functions that open a connection
+     per request. It does not support prepared statements, which is not what a long-running
+     ASP.NET Core process with a connection pool wants.
+   - **Session pooler** (port 5432) is IPv4 on every plan and keeps a real session per connection.
+     That is this application.
+
 5. Convert it to the .NET form and **require TLS**:
 
 ```
-Host=aws-0-<region>.pooler.supabase.com;Port=6543;Database=postgres;Username=postgres.<project-ref>;Password=<password>;SSL Mode=Require;Trust Server Certificate=true
+Host=aws-<index>-<region>.pooler.supabase.com;Port=5432;Database=postgres;Username=postgres.<project-ref>;Password=<password>;SSL Mode=Require;Trust Server Certificate=true
 ```
 
 That string is a credential. It goes in Render's environment settings and nowhere else — never in
@@ -112,7 +133,7 @@ is a decision, not a side effect of a deploy. Apply migrations from your own mac
 
 ```bash
 cd backend
-export ConnectionStrings__DefaultConnection='<the pooled connection string>'
+export ConnectionStrings__DefaultConnection='<the session pooler connection string>'
 dotnet ef migrations script --idempotent \
   --project Quotely.Migrations.PostgreSql --startup-project Quotely.Migrations.PostgreSql \
   --output /tmp/quotely-pg.sql
@@ -147,7 +168,7 @@ Set these in Render → Environment:
 
 ```
 ASPNETCORE_ENVIRONMENT=Production
-ConnectionStrings__DefaultConnection=<the Supabase pooled string>
+ConnectionStrings__DefaultConnection=<the Supabase session pooler string>
 JWT__KEY=<openssl rand -base64 48>
 Razorpay__KeyId=<TEST key id>
 Razorpay__KeySecret=<TEST key secret>
@@ -285,6 +306,11 @@ pg_dump "<the direct, non-pooled connection string>" --file quotely-$(date +%F).
 ```
 
 Keep it somewhere that is not the same laptop.
+
+**Vercel Hobby does not permit commercial use.** Repeated here because it is the limit most
+likely to be forgotten: it is a licensing limit rather than a technical one, so nothing will break
+and no error will appear — the project is simply out of compliance the moment Quotely takes a real
+payment, and the remedy is a Pro plan or a different host. See the caveat at the top.
 
 **Cold starts, pauses and the 500 MB ceiling are acceptable for what this is**: an MVP for demos,
 early testers and first-customer discovery. They are not acceptable for a business depending on

@@ -25,9 +25,11 @@ services:
         value: Production
 
       # ---- database ----
-      # Supabase's POOLED connection string (port 6543). Render's free tier restarts the container
-      # on every deploy and after each sleep, and a pooler survives that far better than a direct
-      # connection to a free Postgres instance. Must include SSL Mode=Require.
+      # Supabase's SESSION POOLER string (port 5432, host aws-<index>-<region>.pooler.supabase.com,
+      # user postgres.<project-ref>). Not the direct connection — that is IPv6-only without a paid
+      # add-on and Render's free tier has no IPv6 outbound. Not the transaction pooler on 6543
+      # either: that is for per-request serverless connections, not a long-running process with a
+      # connection pool. Must include SSL Mode=Require.
       - key: ConnectionStrings__DefaultConnection
         sync: false
 
