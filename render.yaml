@@ -54,11 +54,13 @@ services:
         sync: false
 
       # ---- the customer-facing site ----
-      # Origin of the Vercel deployment. Public quotation and invoice URLs are built from it, so a
-      # wrong value produces links that resolve to nothing.
+      # Origin of the Cloudflare Pages deployment (https://<project>.pages.dev). Public quotation
+      # and invoice URLs are built from it — /q/{token} and /i/{token} are frontend routes — so
+      # pointing this at the API instead produces links that resolve to nothing.
       - key: PublicLinks__BaseUrl
         sync: false
-      # Explicit allow-list. Never a wildcard: these are the only origins the browser may call the
-      # API from. Configuration binds Cors__AllowedOrigins__0, __1, … as an array.
+      # Explicit allow-list — the same Cloudflare Pages origin. Never a wildcard: these are the only
+      # origins a browser may call the API from. Configuration binds Cors__AllowedOrigins__0, __1, …
+      # as an array.
       - key: Cors__AllowedOrigins__0
         sync: false

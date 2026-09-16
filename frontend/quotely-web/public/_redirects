@@ -1,0 +1,33 @@
+# Cloudflare Pages routing for a statically exported Next.js app.
+#
+# Quotely renders entirely in the browser, so every page is a static file. Next still requires a
+# dynamic segment to be enumerated at build time, so each one is exported once under a placeholder
+# ("/q/token.html", "/customers/id.html") and the rules below serve that file for any real value.
+# The page then reads the actual segment out of the address bar — see lib/route-param.ts.
+#
+# Two properties of Cloudflare's matching shape this file:
+#   1. A rule is followed even when a static asset matches the request, so the literal routes
+#      have to be listed before the placeholder rules that would otherwise swallow them.
+#   2. The first matching rule wins, and ":name" matches exactly one path segment.
+#
+# Status 200 is a rewrite, not a redirect: the address bar keeps the real URL, which is the whole
+# point — that URL is where the token lives.
+
+# ---- literal routes that a ":id" rule would otherwise capture -------------
+/customers/new         /customers/new.html         200
+/invoices/new          /invoices/new.html          200
+/products/new          /products/new.html          200
+/quotations/new        /quotations/new.html        200
+
+# ---- customer-facing links (the ones that get shared) --------------------
+/q/:token              /q/token.html               200
+/i/:token              /i/token.html               200
+
+# ---- authenticated record pages ------------------------------------------
+/customers/:id/edit    /customers/id/edit.html     200
+/customers/:id         /customers/id.html          200
+/invoices/:id/edit     /invoices/id/edit.html      200
+/invoices/:id          /invoices/id.html           200
+/products/:id/edit     /products/id/edit.html      200
+/quotations/:id/edit   /quotations/id/edit.html    200
+/quotations/:id        /quotations/id.html         200

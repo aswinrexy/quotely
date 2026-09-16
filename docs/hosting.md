@@ -7,25 +7,21 @@ Everything below runs on a free plan, and every free plan has teeth. They are li
 
 | Layer | Platform | Plan | Cost |
 | --- | --- | --- | --- |
-| Frontend (Next.js) | Vercel | Hobby | £0 — see the caveat below |
+| Frontend (Next.js) | Cloudflare Pages | Free | £0 |
 | Backend (ASP.NET Core) | Render | Free web service | £0 |
 | Database (PostgreSQL) | Supabase | Free | £0 |
 | Source + CI | GitHub | Free | £0 |
-| Domain | `*.vercel.app` / `*.onrender.com` | — | £0 |
+| Domain | `*.pages.dev` / `*.onrender.com` | — | £0 |
 
 No custom domain, no paid add-on, no card on file. A domain is worth buying when there is revenue
 to justify it; until then the platform domains are real, HTTPS-terminated URLs that work.
 
-> **Vercel Hobby is licensed for non-commercial personal use only.** Vercel's fair-use guidelines
-> name "any method of requesting or processing payment from visitors of the site" as commercial
-> usage, and Quotely's public invoice page does exactly that. While the deployment is a private
-> MVP in Razorpay TEST mode with no real money moving, it is defensible; the day a real customer
-> pays a real invoice through it, Hobby is the wrong plan and Vercel may pause the project.
->
-> Two ways out, both still £0: move the frontend to a **Render static site** (same account as the
-> API, free, no commercial-use restriction) or to **Cloudflare Pages** (free, commercial use
-> permitted). The third is to pay for Vercel Pro when there is revenue to pay it with. This is a
-> licensing decision, not a technical one — the Next.js build is identical on all three.
+> **Why not Vercel.** Vercel's Hobby plan is licensed for non-commercial personal use only, and
+> its fair-use guidelines name "any method of requesting or processing payment from visitors of
+> the site" as commercial usage. Quotely's public invoice page does exactly that, so Hobby would
+> be the wrong plan the day a real customer pays — and Vercel Pro is not £0. Cloudflare Pages
+> permits commercial use on its free tier, so it is the honest choice here rather than the
+> convenient one. Vercel is not part of this architecture.
 
 ---
 
@@ -33,7 +29,8 @@ to justify it; until then the platform domains are real, HTTPS-terminated URLs t
 
 **Nothing is deployed yet.** This repository is *prepared* for the deployment described here — the
 Dockerfile, the blueprint, the PostgreSQL provider and the configuration all exist and have been
-exercised locally — but no Render service, Vercel project or Supabase database has been created.
+exercised locally — but no Render service, Cloudflare Pages project or Supabase database has been
+created.
 Creating them needs accounts this repository does not have.
 
 There are therefore no live URLs to quote. The ones in this document are shaped like the real
@@ -173,45 +170,78 @@ JWT__KEY=<openssl rand -base64 48>
 Razorpay__KeyId=<TEST key id>
 Razorpay__KeySecret=<TEST key secret>
 Razorpay__WebhookSecret=<TEST webhook secret>
-PublicLinks__BaseUrl=https://<your-project>.vercel.app
-Cors__AllowedOrigins__0=https://<your-project>.vercel.app
+PublicLinks__BaseUrl=https://<your-project>.pages.dev
+Cors__AllowedOrigins__0=https://<your-project>.pages.dev
 ```
 
-`PublicLinks__BaseUrl` is what every public quotation and invoice URL is built from. Get it wrong
-and the links you send customers resolve to nothing.
+`PublicLinks__BaseUrl` is the **frontend** origin — the Cloudflare Pages URL — because that is
+where `/q/{token}` and `/i/{token}` live. It is what every public quotation and invoice URL is
+built from, so pointing it at the API instead produces links that resolve to nothing.
 
 ---
 
-## Vercel — the web app
+## Cloudflare Pages — the web app
 
-Zero configuration beyond two settings, so there is no `vercel.json` to go stale:
+Quotely's frontend is a **static site**. Every page is a client component that fetches from the
+API in the browser: no server rendering, no route handlers, no server actions. So it is exported
+to plain HTML/CSS/JS and served from Cloudflare's CDN — which on the free tier means unlimited
+bandwidth, unlimited static requests, no cold start, and no Workers quota to run out of.
 
 | Setting | Value |
 | --- | --- |
-| Root Directory | `frontend/quotely-web` |
-| Framework | Next.js (detected) |
+| Build command | `npm run build` |
+| Build output directory | `out` |
+| Root directory | `frontend/quotely-web` |
 | Production branch | `main` |
 | `NEXT_PUBLIC_API_BASE_URL` | `https://<your-service>.onrender.com` |
 
-`NEXT_PUBLIC_API_BASE_URL` is inlined into the browser bundle at build time, so **changing it
-requires a redeploy**, not just a restart.
+`NEXT_PUBLIC_API_BASE_URL` is inlined into the JavaScript bundle **at build time**, so changing it
+requires a rebuild, not a restart. It is the only environment variable the frontend has.
 
 Nothing secret is or may be exposed to the browser. Every `NEXT_PUBLIC_` variable is readable with
-View Source, and Quotely has exactly one. In particular the Razorpay **Key Secret** is never sent
-to the frontend: the browser receives only the Key ID, from the API, at payment time.
+View Source. In particular the Razorpay **Key Secret** is never sent to the frontend: the browser
+receives only the Key ID, from the API, at payment time.
+
+### How the dynamic routes work
+
+This is the one part worth understanding before changing it.
+
+A static export has no server, so Next requires every dynamic segment to be enumerated at build
+time. Quotely's cannot be: a share token is 256 bits of randomness and an invoice id is a GUID.
+So each dynamic route is exported **once** under a placeholder — `/q/token.html`,
+`/customers/id.html` — and [`public/_redirects`](../frontend/quotely-web/public/_redirects)
+rewrites every real URL onto that file with status `200`. A `200` is a rewrite rather than a
+redirect, so the address bar keeps the real URL.
+
+The page then reads the segment out of the address bar via
+[`lib/route-param.ts`](../frontend/quotely-web/lib/route-param.ts), **not** via Next's
+`useParams()`. That distinction is not cosmetic: `useParams()` returns the placeholder that was
+baked into the prerendered page and never revisits it, so a page using it would ask the API for a
+quotation called "token". This was found by testing, not by reading, and it is the single thing
+most likely to be broken by a well-meaning refactor.
+
+Two consequences for `_redirects`:
+
+- Cloudflare follows a matching rule **even when a static asset matches the request**, so literal
+  routes like `/customers/new` must be listed *before* the `/customers/:id` rule that would
+  otherwise swallow them.
+- The first matching rule wins, and `:name` matches exactly one path segment.
+
+Add a route with a dynamic segment and you must add a rule here too, or it will 404 in production
+while working perfectly in `next dev`.
 
 ---
 
 ## CORS
 
 The API allows an explicit list of origins and never `AllowAnyOrigin`. In a deployed environment
-that list is exactly the Vercel URL:
+that list is exactly the Cloudflare Pages URL:
 
 ```
-Cors__AllowedOrigins__0=https://<your-project>.vercel.app
+Cors__AllowedOrigins__0=https://<your-project>.pages.dev
 ```
 
-Add `Cors__AllowedOrigins__1`, `__2` … for preview deployments if you need them. Localhost stays
+Add `Cors__AllowedOrigins__1`, `__2` … for Cloudflare preview deployments if you need them. Localhost stays
 allowed in Development only, from `appsettings.json`.
 
 A request from any other origin gets no `Access-Control-Allow-Origin` header back, which is what
@@ -252,7 +282,7 @@ infrastructure will not carry four permanently running instances, so:
 | --- | --- | --- |
 | DEV | your laptop | SQLite, no cloud anything |
 | TEST | a second free Render service + a second free Supabase project, tracking `develop` | optional; create it when you need somewhere shared to try things |
-| UAT | Vercel preview deployments of the release branch | no permanent instance; a preview URL is enough for a sign-off |
+| UAT | Cloudflare Pages preview deployments of the release branch | no permanent instance; a preview URL is enough for a sign-off |
 | PROD | the free Render service + Supabase project, tracking `main` | the public deployment |
 
 Every environment still gets **its own JWT key, its own webhook secret and its own database**. A
@@ -268,7 +298,7 @@ one would need API tokens to do a worse job of what the platforms already do:
 ```
 feature/*  →  PR  →  develop  →  (optional TEST service redeploys)
                         │
-                 release/vX.Y.Z  →  PR  →  main  →  Render + Vercel redeploy PROD
+                 release/vX.Y.Z  →  PR  →  main  →  Render + Cloudflare redeploy PROD
                                               │
                                             tag  →  GitHub Release
 ```
@@ -307,10 +337,10 @@ pg_dump "<the direct, non-pooled connection string>" --file quotely-$(date +%F).
 
 Keep it somewhere that is not the same laptop.
 
-**Vercel Hobby does not permit commercial use.** Repeated here because it is the limit most
-likely to be forgotten: it is a licensing limit rather than a technical one, so nothing will break
-and no error will appear — the project is simply out of compliance the moment Quotely takes a real
-payment, and the remedy is a Pro plan or a different host. See the caveat at the top.
+**Cloudflare Pages is the least limited piece here.** Static assets are unmetered, bandwidth is
+uncapped and commercial use is permitted, so the frontend is the one layer that will not fall over
+or fall foul of a licence. The cap that exists is **500 builds per month**, which is a lot of
+deploys but not infinite if something starts pushing in a loop.
 
 **Cold starts, pauses and the 500 MB ceiling are acceptable for what this is**: an MVP for demos,
 early testers and first-customer discovery. They are not acceptable for a business depending on
@@ -341,7 +371,7 @@ curl -s -o /dev/null -w '%{http_code}\n' $API/api/quotations           # 401 —
 curl -s -o /dev/null -w '%{http_code}\n' $API/api/public/quotations/not-a-real-token-000000   # 404
 ```
 
-CORS, from a browser console on the Vercel site — it must succeed there and fail from anywhere
+CORS, from a browser console on the Cloudflare Pages site — it must succeed there and fail from anywhere
 else:
 
 ```js
@@ -406,10 +436,10 @@ None of this can be done from a repository, and none of it has been done:
 1. Create a Supabase project (**new**, not an existing one) and keep the password.
 2. Apply the PostgreSQL migration script to it.
 3. Create the Render service from `render.yaml` and fill in the seven environment values.
-4. Create the Vercel project with Root Directory `frontend/quotely-web` and set
-   `NEXT_PUBLIC_API_BASE_URL` to the Render URL.
-5. Go back to Render and set `PublicLinks__BaseUrl` and `Cors__AllowedOrigins__0` to the Vercel
-   URL. Neither exists until step 4 is done, which is why this is a separate step.
+4. Create the Cloudflare Pages project — root directory `frontend/quotely-web`, build command
+   `npm run build`, output directory `out` — and set `NEXT_PUBLIC_API_BASE_URL` to the Render URL.
+5. Go back to Render and set `PublicLinks__BaseUrl` and `Cors__AllowedOrigins__0` to the
+   Cloudflare Pages URL. Neither exists until step 4 is done, which is why this is a separate step.
 6. Register the Razorpay TEST webhook at `/api/webhooks/razorpay` and set the webhook secret.
 7. Record the real URLs at the top of this document, replacing the examples.
 8. Run the [smoke test](#smoke-test) against the live deployment before telling anyone it is ready.

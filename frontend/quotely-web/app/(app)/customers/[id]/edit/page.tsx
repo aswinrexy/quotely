@@ -1,40 +1,18 @@
-"use client";
+import EditCustomerPage from "./edit-customer-page";
 
-import { useEffect, useState } from "react";
-import { useParams } from "next/navigation";
-import { api } from "@/lib/api";
-import { CustomerForm } from "@/components/app/customer-form";
-import { PageHeader } from "@/components/app/page-header";
-import { Card } from "@/components/ui/card";
-import { ErrorState, LoadingState } from "@/components/ui/states";
-import type { Customer } from "@/types";
+/**
+ * Static-export shell for a route whose parameter cannot be known at build time.
+ *
+ * Quotely is hosted as static files, and every page renders entirely in the browser from the
+ * API — there is no server rendering to do. Next still insists a dynamic segment be enumerated
+ * at build time, so one placeholder is emitted and the host rewrites every real URL onto it
+ * (see public/_redirects). The browser router then reads the real "id" out of the address
+ * bar, which is where it was always going to come from.
+ */
+export function generateStaticParams() {
+  return [{ id: "id" }];
+}
 
-export default function EditCustomerPage() {
-  const { id } = useParams<{ id: string }>();
-  const [customer, setCustomer] = useState<Customer | null>(null);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    api
-      .get<Customer>(`/api/customers/${id}`)
-      .then(setCustomer)
-      .catch((err) => setError(err instanceof Error ? err.message : "Could not load the customer."));
-  }, [id]);
-
-  return (
-    <>
-      <PageHeader title="Edit customer" />
-      {error ? (
-        <Card>
-          <ErrorState message={error} />
-        </Card>
-      ) : !customer ? (
-        <Card>
-          <LoadingState />
-        </Card>
-      ) : (
-        <CustomerForm customer={customer} />
-      )}
-    </>
-  );
+export default function Page() {
+  return <EditCustomerPage />;
 }
