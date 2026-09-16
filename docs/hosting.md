@@ -27,15 +27,18 @@ to justify it; until then the platform domains are real, HTTPS-terminated URLs t
 
 ## Status
 
-**Nothing is deployed yet.** This repository is *prepared* for the deployment described here — the
-Dockerfile, the blueprint, the PostgreSQL provider and the configuration all exist and have been
-exercised locally — but no Render service, Cloudflare Pages project or Supabase database has been
-created.
-Creating them needs accounts this repository does not have.
+**The database exists and is migrated. Nothing else is deployed.**
 
-There are therefore no live URLs to quote. The ones in this document are shaped like the real
-thing (`https://quotely-api.onrender.com`) but they are **examples**, not addresses that resolve.
-Replace them with the real ones the platforms hand you, and record them here.
+| Layer | State |
+| --- | --- |
+| Supabase PostgreSQL | **Created and migrated** — 17 tables, 49 indexes, 19 foreign keys, schema verified |
+| Render API | Not created |
+| Cloudflare Pages | Not created |
+| Razorpay webhook | Not configured — needs the API's public URL first |
+
+There are therefore still no live application URLs. Any URL in this document shaped like
+`https://quotely-api.onrender.com` is an **example**, not an address that resolves. Replace them
+with the real ones the platforms hand you, and record them here.
 
 [What you have to do yourself](#what-you-have-to-do-yourself) is the checklist.
 
@@ -141,6 +144,56 @@ idempotent, so it is safe against a database that is already partly up to date.
 
 **Production is never seeded.** `Seed:Enabled` is `false` and there is no demo account, no fake
 customer and no fake payment in a database that will hold real ones.
+
+---
+
+## What the database looks like, verified
+
+The PostgreSQL migration has been applied to the Supabase project and the result inspected. This
+is what was checked, because "the migration ran" is not the same as "the schema means what the
+model means":
+
+| Check | Result |
+| --- | --- |
+| Tables | 17 — Identity (8), business profile, customers, products, quotations + items, invoices + items, payments, webhook events |
+| Indexes | 49 |
+| Foreign keys | 19, with the intended `CASCADE` / `RESTRICT` / `SET NULL` behaviours |
+| Money | `numeric(18,2)` — exact decimal, never a float |
+| Quantity / tax | `numeric(18,3)` / `numeric(5,2)` |
+| Calendar dates | `date` (`DueDate`, `ValidUntil`, `InvoiceDate`) |
+| Instants | `timestamp with time zone` (`PaidAt`, `VoidedAt`, `PublicLinkCreatedAt`) |
+| Keys | native `uuid`, not text |
+| Seed data | **none** — every table is empty, as production must be |
+
+The interesting one was **partial uniqueness**, tested rather than assumed by writing rows into
+the real tables inside a transaction that was then deliberately aborted:
+
+- Two invoices with `QuotationId` NULL under a `UNIQUE` index — **accepted**, so any number of
+  directly raised invoices can coexist.
+- A second invoice reusing a non-null `PublicTokenHash` — **rejected**, so a share token can never
+  resolve to two invoices.
+
+That is exactly the guarantee SQL Server gets from a filtered index, reached on PostgreSQL by its
+treating NULLs as distinct. Nothing was committed by the probe.
+
+### Row-level security
+
+Supabase enables RLS on every table created in `public` (via its own `rls_auto_enable` event
+trigger), so all 17 tables have RLS **on with zero policies**. For Quotely that is the right
+answer, and it is worth understanding why before someone "fixes" it:
+
+- The **Data API** (PostgREST, the `anon` and `authenticated` roles) is denied everything. Quotely
+  does not use PostgREST at all, so denying it costs nothing and closes the hole that a public
+  `anon` key would otherwise open.
+- The **application** connects as `postgres` through the session pooler. That role has
+  `rolbypassrls`, and the tables are owned by it, so the API reads and writes normally.
+
+**Do not add RLS policies to make something work.** If a query is refused, the cause is the
+connection, not the policy set. Tenant isolation in Quotely is enforced in the application by
+`ICurrentUser` and a `UserId` filter on every query — that is the boundary, and it is tested.
+
+For belt and braces you can also switch the Data API off entirely in
+**Project Settings → Data API**, since nothing uses it.
 
 ---
 
@@ -431,18 +484,17 @@ Free and lightweight, on purpose. No Datadog, no New Relic, no Application Insig
 
 ## What you have to do yourself
 
-None of this can be done from a repository, and none of it has been done:
+The database is done. What remains needs a browser and an account:
 
-1. Create a Supabase project (**new**, not an existing one) and keep the password.
-2. Apply the PostgreSQL migration script to it.
-3. Create the Render service from `render.yaml` and fill in the seven environment values.
-4. Create the Cloudflare Pages project — root directory `frontend/quotely-web`, build command
+1. ~~Create a Supabase project and apply the migration.~~ **Done.**
+2. Create the Render service from `render.yaml` and fill in its environment values.
+3. Create the Cloudflare Pages project — root directory `frontend/quotely-web`, build command
    `npm run build`, output directory `out` — and set `NEXT_PUBLIC_API_BASE_URL` to the Render URL.
-5. Go back to Render and set `PublicLinks__BaseUrl` and `Cors__AllowedOrigins__0` to the
-   Cloudflare Pages URL. Neither exists until step 4 is done, which is why this is a separate step.
-6. Register the Razorpay TEST webhook at `/api/webhooks/razorpay` and set the webhook secret.
-7. Record the real URLs at the top of this document, replacing the examples.
-8. Run the [smoke test](#smoke-test) against the live deployment before telling anyone it is ready.
+4. Go back to Render and set `PublicLinks__BaseUrl` and `Cors__AllowedOrigins__0` to the
+   Cloudflare Pages URL. Neither exists until step 3 is done, which is why this is separate.
+5. Register the Razorpay TEST webhook at `/api/webhooks/razorpay` and set the webhook secret.
+6. Record the real URLs at the top of this document, replacing the examples.
+7. Run the [smoke test](#smoke-test) against the live deployment before telling anyone it is ready.
 
 **Rotate any Razorpay test secret that has been pasted into a terminal, a chat or a screenshot.**
 None has ever been committed to this repository — but a secret that has been seen outside a secret
