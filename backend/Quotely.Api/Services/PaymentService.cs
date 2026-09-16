@@ -425,7 +425,14 @@ public class PaymentService : IPaymentService
 
         // Back-dating is normal — last week's cash gets entered today. Forward-dating is not:
         // that money has not been received, and recording it would overstate what is collected.
-        if (paymentDate > today)
+        //
+        // The bound is UTC tomorrow rather than UTC today, because "today" is a local idea. A
+        // business in Chennai recording a cash payment at 1am is on a calendar date UTC has not
+        // reached, and rejecting that would have made the app look broken every night between
+        // midnight and 05:30 — which is exactly what it did before this line said so. No timezone
+        // is further ahead than UTC+14, so a local date can never be more than one day ahead of a
+        // UTC one: this admits every real owner and nothing beyond them.
+        if (paymentDate > today.AddDays(1))
             throw ApiException.BadRequest("A payment date cannot be in the future.");
 
         var strategy = _db.Database.CreateExecutionStrategy();

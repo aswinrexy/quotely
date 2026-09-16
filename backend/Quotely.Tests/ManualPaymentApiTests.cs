@@ -292,13 +292,31 @@ public class ManualPaymentApiTests : IClassFixture<QuotelyApiFactory>
     }
 
     [Fact]
-    public async Task A_future_payment_date_is_refused()
+    public async Task A_genuinely_future_payment_date_is_refused()
     {
         var client = await _factory.CreateSignedInClientAsync();
         var invoice = await CreateInvoiceAsync(client);
 
-        (await RecordAsync(client, invoice.Id, 1000m, paymentDate: Today.AddDays(1)))
+        (await RecordAsync(client, invoice.Id, 1000m, paymentDate: Today.AddDays(2)))
             .StatusCode.Should().Be(HttpStatusCode.BadRequest);
+    }
+
+    /// <summary>
+    /// The owner's "today" is a local date, and east of UTC it runs ahead of the server's. A
+    /// business in Chennai entering a cash payment at 1am is a full calendar day ahead of UTC,
+    /// and refusing that made the app look broken every night between midnight and 05:30. One
+    /// day of tolerance covers every timezone, since none is further ahead than UTC+14.
+    /// </summary>
+    [Fact]
+    public async Task A_payment_dated_tomorrow_in_utc_is_accepted_for_owners_east_of_it()
+    {
+        var client = await _factory.CreateSignedInClientAsync();
+        var invoice = await CreateInvoiceAsync(client);
+
+        var response = await RecordAsync(client, invoice.Id, 1000m, paymentDate: Today.AddDays(1));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Created);
+        (await ReadInvoiceAsync(client, invoice.Id))!.Paid.Should().Be(1000m);
     }
 
     [Theory]
