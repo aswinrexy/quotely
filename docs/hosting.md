@@ -27,7 +27,7 @@ to justify it; until then the platform domains are real, HTTPS-terminated URLs t
 
 ## Status
 
-**Database and API are live. The web app is not deployed yet.**
+**All three layers are live.** The Razorpay webhook is the last thing to register.
 
 | Layer | State | URL |
 | --- | --- | --- |
@@ -35,13 +35,13 @@ to justify it; until then the platform domains are real, HTTPS-terminated URLs t
 | Render API | **Live**, smoke-tested | https://quotely-api-yiul.onrender.com |
 | Health | **Live** | https://quotely-api-yiul.onrender.com/health |
 | Razorpay webhook | Endpoint live, **not yet registered** | https://quotely-api-yiul.onrender.com/api/webhooks/razorpay |
-| Cloudflare Pages | Not created | — |
+| Cloudflare Pages | **Live** | https://quotely-4j2.pages.dev |
 
 The API currently deploys from **`feature/v2.6-quotation-sharing`**, not `main`: `main` is still at
 V2.4 and has neither V2.5 nor V2.6. Repoint it to `main` once V2.6 has been released there.
 
-Until the web app exists, `PublicLinks__BaseUrl` and `Cors__AllowedOrigins__0` are placeholders, so
-share links point at a host that does not resolve. That is expected, and step 4 below fixes it.
+Both the API and the web app deploy from `feature/v2.6-quotation-sharing`. Repoint each to `main`
+once V2.6 has been released there.
 
 ---
 
