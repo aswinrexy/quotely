@@ -160,6 +160,8 @@ export interface SaveQuotationRequest {
 export interface PublicQuotationLink {
   url: string;
   createdAt: string;
+  /** Ready-made share material, composed server-side while the URL still exists. */
+  share: DocumentShare;
 }
 
 export interface PublicQuotationItem {
@@ -290,6 +292,10 @@ export interface InvoiceListItem {
   status: InvoiceStatus;
   grandTotal: number;
   currency: string;
+  /** Summed from payments that count, by the server. */
+  paid: number;
+  outstanding: number;
+  /** Derived per request from the due date and the balance — never a stored status. */
   isOverdue: boolean;
   /** The source quotation's number, or empty when the invoice was raised directly. */
   quotationNumber: string;
@@ -362,6 +368,37 @@ export interface SaveInvoiceRequest {
 
 export type PaymentStatus = "Created" | "Pending" | "Captured" | "Failed" | "Cancelled";
 
+/** Where the money came from. Only a manual payment can be voided. */
+export type PaymentSource = "Gateway" | "Manual";
+
+/** The ways money arrives outside the gateway. Must match ManualPaymentMethods on the server. */
+export const MANUAL_PAYMENT_METHODS = [
+  "cash",
+  "bank_transfer",
+  "upi",
+  "cheque",
+  "other",
+] as const;
+
+export type ManualPaymentMethod = (typeof MANUAL_PAYMENT_METHODS)[number];
+
+export const MANUAL_PAYMENT_METHOD_LABELS: Record<ManualPaymentMethod, string> = {
+  cash: "Cash",
+  bank_transfer: "Bank transfer",
+  upi: "UPI",
+  cheque: "Cheque",
+  other: "Other",
+};
+
+/** What the browser sends. Note the absence of any total: the server validates against its own. */
+export interface RecordManualPaymentRequest {
+  amount: number;
+  method: ManualPaymentMethod;
+  paymentDate: string;
+  reference?: string | null;
+  notes?: string | null;
+}
+
 export interface PaymentSummary {
   total: number;
   paid: number;
@@ -379,13 +416,20 @@ export interface Payment {
   amount: number;
   currency: string;
   status: PaymentStatus;
+  source: PaymentSource;
   provider: string;
+  /** The provider's reference for gateway money; the owner's own for a manual payment. */
   reference?: string | null;
   orderReference?: string | null;
   method?: string | null;
+  notes?: string | null;
   failureReason?: string | null;
   paidAt?: string | null;
   createdAt: string;
+  voidedAt?: string | null;
+  isVoided: boolean;
+  /** True only for a manual payment that still stands — the one row that offers Void. */
+  canVoid: boolean;
 }
 
 export interface InvoicePayments {
@@ -397,14 +441,15 @@ export interface PublicInvoiceLink {
   url: string;
   createdAt: string;
   /** Ready-made share material, composed server-side while the URL still exists. */
-  share: InvoiceShare;
+  share: DocumentShare;
 }
 
 /**
- * Deep links for handing an invoice to a customer (V2.4). Quotely sends nothing: these open
- * WhatsApp and the owner's own mail client with the message already written.
+ * Deep links for handing a document to a customer — an invoice (V2.4) or a quotation (V2.6).
+ * Quotely sends nothing: these open WhatsApp and the owner's own mail client with the message
+ * already written, and every figure inside was composed by the server.
  */
-export interface InvoiceShare {
+export interface DocumentShare {
   url: string;
   message: string;
   emailSubject: string;
@@ -486,4 +531,40 @@ export interface VerifyPaymentResponse {
   currency: string;
   paymentReference?: string | null;
   message?: string | null;
+}
+
+// ---- V2.5 receivables --------------------------------------------------
+
+/** What the business is owed, aggregated by the server across every issued invoice. */
+export interface Receivables {
+  totalOutstanding: number;
+  totalOverdue: number;
+  countOutstanding: number;
+  countOverdue: number;
+  currency: string;
+  needsAttention: ReceivableInvoice[];
+}
+
+export interface ReceivableInvoice {
+  id: string;
+  invoiceNumber: string;
+  customerName: string;
+  dueDate: string;
+  outstanding: number;
+  currency: string;
+  isOverdue: boolean;
+}
+
+/** One customer's financial standing, with their invoices paged server-side. */
+export interface CustomerSummary {
+  customerId: string;
+  customerName: string;
+  totalInvoiced: number;
+  totalPaid: number;
+  totalOutstanding: number;
+  totalOverdue: number;
+  invoiceCount: number;
+  overdueCount: number;
+  currency: string;
+  invoices: PagedResult<InvoiceListItem>;
 }

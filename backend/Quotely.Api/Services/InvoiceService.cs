@@ -10,6 +10,9 @@ public interface IInvoiceService
 {
     Task<PagedResult<InvoiceListItemDto>> ListAsync(Guid userId, string? search, string? status, int page, int pageSize, CancellationToken ct = default);
     Task<InvoiceDto> GetAsync(Guid userId, Guid id, CancellationToken ct = default);
+
+    /// <summary>Receivables across the tenant's issued invoices, computed by the database.</summary>
+    Task<ReceivablesDto> GetReceivablesAsync(Guid userId, int needsAttention = 5, CancellationToken ct = default);
     Task<InvoiceDto> ConvertFromQuotationAsync(Guid userId, Guid quotationId, CancellationToken ct = default);
     Task<InvoiceDto> CreateAsync(Guid userId, CreateInvoiceRequest request, CancellationToken ct = default);
     Task<InvoiceDto> UpdateAsync(Guid userId, Guid id, SaveInvoiceRequest request, CancellationToken ct = default);
@@ -209,45 +212,89 @@ public class InvoiceService : IInvoiceService
                 (i.Quotation != null && i.Quotation.QuotationNumber.Contains(term)));
         }
 
-        if (!string.IsNullOrWhiteSpace(status) && Enum.TryParse<InvoiceStatus>(status, true, out var parsed))
-            query = query.Where(i => i.Status == parsed);
-
-        var total = await query.CountAsync(ct);
         var today = Today;
 
+        if (!string.IsNullOrWhiteSpace(status))
+        {
+            // "Overdue" is not a stored status — it is a condition derived from the due date and
+            // the balance — so the filter is a ledger query, evaluated in SQL, not an equality
+            // check. Every other value still matches the stored status exactly.
+            if (string.Equals(status, nameof(InvoiceStatus.Overdue), StringComparison.OrdinalIgnoreCase))
+                query = query.Overdue(today);
+            else if (Enum.TryParse<InvoiceStatus>(status, true, out var parsed))
+                query = query.Where(i => i.Status == parsed);
+        }
+
+        var total = await query.CountAsync(ct);
+
+        // Ordered and paged as invoices, then read as listing rows in one projection.
         var rows = await query
             .OrderByDescending(i => i.Sequence)
             .Skip((page - 1) * pageSize)
             .Take(pageSize)
-            .Select(i => new
-            {
-                i.Id,
-                i.InvoiceNumber,
-                i.CustomerName,
-                i.InvoiceDate,
-                i.DueDate,
-                i.Status,
-                i.GrandTotal,
-                i.Currency,
-                QuotationNumber = i.Quotation != null ? i.Quotation.QuotationNumber : null
-            })
+            .ListRows()
             .ToListAsync(ct);
 
-        var items = rows.Select(i => new InvoiceListItemDto
-        {
-            Id = i.Id,
-            InvoiceNumber = i.InvoiceNumber,
-            CustomerName = i.CustomerName,
-            InvoiceDate = i.InvoiceDate,
-            DueDate = i.DueDate,
-            Status = i.Status.ToString(),
-            GrandTotal = i.GrandTotal,
-            Currency = i.Currency,
-            IsOverdue = i.Status is not (InvoiceStatus.Paid or InvoiceStatus.Cancelled) && i.DueDate < today,
-            QuotationNumber = i.QuotationNumber ?? string.Empty
-        }).ToList();
+        var items = rows.Select(r => r.ToDto(today)).ToList();
 
         return new PagedResult<InvoiceListItemDto>(items, page, pageSize, total);
+    }
+
+    /// <summary>
+    /// What the business is owed, summed by the database across every issued invoice. Drafts and
+    /// cancelled invoices are excluded because neither represents collectable money.
+    ///
+    /// The outstanding figure here is the same one the invoice detail page shows, because both
+    /// derive from <see cref="InvoiceLedger"/> — there is no second definition of "paid" that
+    /// could disagree with the first.
+    /// </summary>
+    public async Task<ReceivablesDto> GetReceivablesAsync(Guid userId, int needsAttention = 5, CancellationToken ct = default)
+    {
+        needsAttention = Math.Clamp(needsAttention, 0, 20);
+        var today = Today;
+
+        var mine = _db.Invoices.AsNoTracking().Where(i => i.UserId == userId);
+
+        var unpaid = mine.Unpaid();
+        var overdue = mine.Overdue(today);
+
+        // SUM and COUNT run in the database. No page of invoices is fetched to add up — not in
+        // the browser, and not here either.
+        var totalOutstanding = await unpaid.OutstandingAmounts().SumAsync(ct);
+        var countOutstanding = await unpaid.CountAsync(ct);
+        var totalOverdue = await overdue.OutstandingAmounts().SumAsync(ct);
+        var countOverdue = await overdue.CountAsync(ct);
+
+        var attention = needsAttention == 0
+            ? new List<ReceivableInvoiceDto>()
+            : (await unpaid
+                // Oldest due date first: whatever has been owed longest needs chasing first.
+                .OrderBy(i => i.DueDate)
+                .ThenBy(i => i.Sequence)
+                .Take(needsAttention)
+                .ListRows()
+                .ToListAsync(ct))
+                .Select(r => new ReceivableInvoiceDto
+                {
+                    Id = r.Id,
+                    InvoiceNumber = r.InvoiceNumber,
+                    CustomerName = r.CustomerName,
+                    DueDate = r.DueDate,
+                    Outstanding = Math.Max(0m, r.GrandTotal - r.Paid),
+                    Currency = r.Currency,
+                    IsOverdue = r.DueDate < today
+                })
+                .ToList();
+
+        return new ReceivablesDto
+        {
+            TotalOutstanding = totalOutstanding,
+            TotalOverdue = totalOverdue,
+            CountOutstanding = countOutstanding,
+            CountOverdue = countOverdue,
+            Currency = await GetCurrencyAsync(userId, ct),
+            NeedsAttention = attention
+        };
     }
 
     public async Task<InvoiceDto> GetAsync(Guid userId, Guid id, CancellationToken ct = default)
@@ -257,11 +304,12 @@ public class InvoiceService : IInvoiceService
         return Map(invoice, business, Today, await CapturedTotalAsync(id, ct));
     }
 
-    /// <summary>The paid amount is always the sum of captured payments, never a stored column.</summary>
-    private async Task<decimal> CapturedTotalAsync(Guid invoiceId, CancellationToken ct) =>
-        await _db.Payments.AsNoTracking()
-            .Where(p => p.InvoiceId == invoiceId && p.Status == PaymentStatus.Captured)
-            .SumAsync(p => (decimal?)p.Amount, ct) ?? 0m;
+    /// <summary>
+    /// The paid amount, from the one place that defines it. This used to be a second local copy
+    /// of the sum, which quietly disagreed with the ledger the moment voiding existed.
+    /// </summary>
+    private Task<decimal> CapturedTotalAsync(Guid invoiceId, CancellationToken ct) =>
+        InvoiceLedger.PaidTotalAsync(_db, invoiceId, ct);
 
     public async Task<Invoice> GetEntityForPdfAsync(Guid userId, Guid id, CancellationToken ct = default)
         => await LoadAsync(userId, id, tracking: false, ct);

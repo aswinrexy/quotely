@@ -1,6 +1,7 @@
 using System.Text;
 using System.Text.Json.Serialization;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -36,6 +37,22 @@ if (string.IsNullOrWhiteSpace(jwtOptions.Key) || jwtOptions.Key.Length < 32)
     }
 }
 
+// Render (and every other PaaS) hands the port to listen on in PORT and terminates TLS itself,
+// so the app must bind every interface rather than loopback. Locally PORT is unset and Kestrel's
+// own configuration continues to apply untouched.
+var port = builder.Configuration["PORT"];
+if (!string.IsNullOrWhiteSpace(port))
+    builder.WebHost.UseUrls($"http://0.0.0.0:{port}");
+
+// Hosted logs are collected as text, so structured JSON lines are what make them searchable.
+// Nothing secret is ever logged: connection strings and keys are read into options objects and
+// never written out.
+if (!builder.Environment.IsDevelopment())
+{
+    builder.Logging.ClearProviders();
+    builder.Logging.AddJsonConsole(o => o.IncludeScopes = true);
+}
+
 var provider = builder.Configuration["Database:Provider"] ?? "SqlServer";
 var connectionString = builder.Configuration.GetConnectionString("DefaultConnection")
                        ?? "Data Source=quotely.db";
@@ -43,9 +60,25 @@ var connectionString = builder.Configuration.GetConnectionString("DefaultConnect
 builder.Services.AddDbContext<AppDbContext>(options =>
 {
     if (provider.Equals("Sqlite", StringComparison.OrdinalIgnoreCase))
+    {
         options.UseSqlite(connectionString);
+    }
+    else if (provider.Equals("Postgres", StringComparison.OrdinalIgnoreCase)
+             || provider.Equals("PostgreSql", StringComparison.OrdinalIgnoreCase))
+    {
+        // PostgreSQL migrations live in their own assembly: the same model produces different DDL
+        // on each engine, and one migration history cannot describe both. The SQL Server set in
+        // this project is untouched by it.
+        options.UseNpgsql(connectionString, npgsql =>
+        {
+            npgsql.EnableRetryOnFailure();
+            npgsql.MigrationsAssembly("Quotely.Migrations.PostgreSql");
+        });
+    }
     else
+    {
         options.UseSqlServer(connectionString, sql => sql.EnableRetryOnFailure());
+    }
 });
 
 // ---- identity + auth -----------------------------------------------------
@@ -93,6 +126,7 @@ builder.Services.AddScoped<IQuotationService, QuotationService>();
 builder.Services.AddScoped<IPublicQuotationService, PublicQuotationService>();
 builder.Services.AddScoped<IInvoiceService, InvoiceService>();
 builder.Services.AddScoped<IPublicInvoiceService, PublicInvoiceService>();
+builder.Services.AddScoped<ICustomerSummaryService, CustomerSummaryService>();
 builder.Services.AddScoped<IPaymentService, PaymentService>();
 builder.Services.AddScoped<IWebhookService, WebhookService>();
 
@@ -138,6 +172,19 @@ var app = builder.Build();
 
 PdfFonts.Register(app.Environment.ContentRootPath, app.Services.GetRequiredService<ILoggerFactory>().CreateLogger("PdfFonts"));
 
+// Behind Render's proxy the request arrives over plain HTTP; without this the app would think
+// every request was insecure and would report the proxy's address as the client's.
+var forwarded = new ForwardedHeadersOptions
+{
+    ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto
+};
+// The platform's load balancer is not on a loopback address, and its address is not known ahead
+// of time, so the default proxy allow-list would discard the headers. This is safe only because
+// nothing but that platform can reach the container: the app is never exposed directly.
+forwarded.KnownIPNetworks.Clear();
+forwarded.KnownProxies.Clear();
+app.UseForwardedHeaders(forwarded);
+
 app.UseMiddleware<ExceptionHandlingMiddleware>();
 
 if (app.Environment.IsDevelopment())
@@ -161,12 +208,12 @@ if (builder.Configuration.GetValue("Database:AutoMigrate", app.Environment.IsDev
     using var scope = app.Services.CreateScope();
     var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
 
-    // Migrations are authored for SQL Server (the supported database). The SQLite provider is a
-    // no-Docker local fallback, so its schema is created directly from the model instead.
-    if (db.Database.IsSqlServer())
-        await db.Database.MigrateAsync();
-    else
+    // SQL Server and PostgreSQL each have a migration history to apply. SQLite is the no-Docker
+    // local fallback and has no migrations of its own, so its schema is created from the model.
+    if (db.Database.IsSqlite())
         await db.Database.EnsureCreatedAsync();
+    else
+        await db.Database.MigrateAsync();
 }
 
 if (builder.Configuration.GetValue("Seed:Enabled", app.Environment.IsDevelopment()))

@@ -1,0 +1,9 @@
+**/bin/
+**/obj/
+**/*.db
+**/*.db-shm
+**/*.db-wal
+**/appsettings.Local.json
+**/appsettings.*.local.json
+Quotely.Tests/
+Quotely.Migrations.PostgreSql/

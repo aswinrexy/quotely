@@ -1,41 +1,18 @@
-"use client";
+import EditQuotationPage from "./edit-quotation-page";
 
-import { useEffect, useState } from "react";
-import { useParams } from "next/navigation";
-import { api } from "@/lib/api";
-import { QuotationForm } from "@/components/app/quotation-form";
-import { PageHeader } from "@/components/app/page-header";
-import { Card } from "@/components/ui/card";
-import { DetailSkeleton, ErrorState } from "@/components/ui/states";
-import type { Quotation } from "@/types";
+/**
+ * Static-export shell for a route whose parameter cannot be known at build time.
+ *
+ * Quotely is hosted as static files, and every page renders entirely in the browser from the
+ * API — there is no server rendering to do. Next still insists a dynamic segment be enumerated
+ * at build time, so one placeholder is emitted and the host rewrites every real URL onto it
+ * (see public/_redirects). The browser router then reads the real "id" out of the address
+ * bar, which is where it was always going to come from.
+ */
+export function generateStaticParams() {
+  return [{ id: "id" }];
+}
 
-export default function EditQuotationPage() {
-  const { id } = useParams<{ id: string }>();
-  const [quotation, setQuotation] = useState<Quotation | null>(null);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    api
-      .get<Quotation>(`/api/quotations/${id}`)
-      .then(setQuotation)
-      .catch((err) => setError(err instanceof Error ? err.message : "Could not load the quotation."));
-  }, [id]);
-
-  return (
-    <>
-      <PageHeader
-        title={quotation ? `Edit ${quotation.quotationNumber}` : "Edit quotation"}
-        description="Changes are recalculated and verified by the server."
-      />
-      {error ? (
-        <Card>
-          <ErrorState message={error} />
-        </Card>
-      ) : !quotation ? (
-        <DetailSkeleton />
-      ) : (
-        <QuotationForm quotation={quotation} />
-      )}
-    </>
-  );
+export default function Page() {
+  return <EditQuotationPage />;
 }

@@ -28,7 +28,13 @@ public record InvoiceListItemDto
     public string Status { get; init; } = nameof(InvoiceStatus.Draft);
     public decimal GrandTotal { get; init; }
     public string Currency { get; init; } = "INR";
-    /// <summary>Past its due date and neither paid nor cancelled. Display hint only.</summary>
+    /// <summary>Summed from payments that count; never a stored column.</summary>
+    public decimal Paid { get; init; }
+    public decimal Outstanding { get; init; }
+    /// <summary>
+    /// Issued, past its due date and still owing something. Derived per request rather than
+    /// stored, so it becomes true the day it should without anything having to run.
+    /// </summary>
     public bool IsOverdue { get; init; }
     /// <summary>The source quotation's number, or empty when the invoice was raised directly.</summary>
     public string QuotationNumber { get; init; } = string.Empty;
@@ -167,4 +173,65 @@ public record CreateInvoiceRequest
 
     [Required, MinLength(1)]
     public List<SaveInvoiceItemRequest> Items { get; init; } = new();
+}
+
+// ---- receivables (V2.5) ----------------------------------------------
+
+/// <summary>
+/// What the business is owed right now, plus the handful of invoices worth chasing first.
+/// Every figure is aggregated by the database across all of the tenant's issued invoices.
+/// </summary>
+public record ReceivablesDto
+{
+    /// <summary>Across every issued invoice with a balance. Excludes drafts and cancellations.</summary>
+    public decimal TotalOutstanding { get; init; }
+
+    /// <summary>The part of the outstanding total that is already past its due date.</summary>
+    public decimal TotalOverdue { get; init; }
+
+    public int CountOutstanding { get; init; }
+    public int CountOverdue { get; init; }
+
+    public string Currency { get; init; } = "INR";
+
+    /// <summary>Unpaid invoices, oldest due date first — what to chase today.</summary>
+    public IReadOnlyList<ReceivableInvoiceDto> NeedsAttention { get; init; } = Array.Empty<ReceivableInvoiceDto>();
+}
+
+public record ReceivableInvoiceDto
+{
+    public Guid Id { get; init; }
+    public string InvoiceNumber { get; init; } = string.Empty;
+    public string CustomerName { get; init; } = string.Empty;
+    public DateOnly DueDate { get; init; }
+    public decimal Outstanding { get; init; }
+    public string Currency { get; init; } = "INR";
+    public bool IsOverdue { get; init; }
+}
+
+/// <summary>
+/// One customer's financial standing, and their invoices. Answers "does this customer owe me
+/// anything?" without the owner adding up invoices by hand.
+/// </summary>
+public record CustomerSummaryDto
+{
+    public Guid CustomerId { get; init; }
+    public string CustomerName { get; init; } = string.Empty;
+
+    /// <summary>Total of every issued invoice — drafts and cancellations excluded throughout.</summary>
+    public decimal TotalInvoiced { get; init; }
+    public decimal TotalPaid { get; init; }
+    public decimal TotalOutstanding { get; init; }
+    public decimal TotalOverdue { get; init; }
+
+    public int InvoiceCount { get; init; }
+    public int OverdueCount { get; init; }
+    public string Currency { get; init; } = "INR";
+
+    /// <summary>
+    /// This customer's invoices, paged server-side. The page the caller asked for, filtered in
+    /// the database — not page one of every invoice filtered in the browser.
+    /// </summary>
+    public PagedResult<InvoiceListItemDto> Invoices { get; init; } =
+        new(Array.Empty<InvoiceListItemDto>(), 1, 10, 0);
 }

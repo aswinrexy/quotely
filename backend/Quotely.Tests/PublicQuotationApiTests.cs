@@ -54,13 +54,15 @@ public class PublicQuotationApiTests : IClassFixture<QuotelyApiFactory>
         return (owner, quotation!);
     }
 
-    private static async Task<string> CreateLinkAsync(HttpClient owner, Guid quotationId)
+    private static async Task<PublicQuotationLinkDto> CreateLinkDtoAsync(HttpClient owner, Guid quotationId)
     {
         var response = await owner.PostAsync($"/api/quotations/{quotationId}/public-link", null);
         response.StatusCode.Should().Be(HttpStatusCode.OK);
-        var link = await response.Content.ReadFromJsonAsync<PublicQuotationLinkDto>();
-        return link!.Url;
+        return (await response.Content.ReadFromJsonAsync<PublicQuotationLinkDto>())!;
     }
+
+    private static async Task<string> CreateLinkAsync(HttpClient owner, Guid quotationId)
+        => (await CreateLinkDtoAsync(owner, quotationId)).Url;
 
     private static string TokenFrom(string url) => url[(url.LastIndexOf('/') + 1)..];
 
@@ -441,6 +443,127 @@ public class PublicQuotationApiTests : IClassFixture<QuotelyApiFactory>
     public async Task An_unknown_token_cannot_fetch_a_pdf()
     {
         var response = await Anonymous(_factory).GetAsync("/api/public/quotations/unknown-token-value-1234567890/pdf");
+
+        response.StatusCode.Should().Be(HttpStatusCode.NotFound);
+    }
+
+    // ---- V2.6: share material -------------------------------------------
+
+    [Fact]
+    public async Task Creating_a_link_returns_ready_to_send_share_material()
+    {
+        var (owner, quotation) = await NewQuotationAsync();
+
+        var link = await CreateLinkDtoAsync(owner, quotation.Id);
+        var share = link.Share;
+
+        share.Url.Should().Be(link.Url, "the message and the copy action must point at one link");
+        share.Message.Should().Be(
+            "Hi John,\n\n" +
+            "Please find quotation " + quotation.QuotationNumber + " from Test Business.\n\n" +
+            "Total: \u20b912,980.00\n" +
+            "Valid until: " + quotation.ValidUntil.ToString("dd MMM yyyy") + "\n\n" +
+            "View quotation:\n" + link.Url + "\n\n" +
+            "Thank you.");
+        share.EmailSubject.Should().Be($"Quotation {quotation.QuotationNumber} from Test Business");
+
+        // Addressed from the stored customer record, normalised for each transport.
+        share.CustomerPhone.Should().Be("919123456780");
+        share.CustomerEmail.Should().Be("john@example.com");
+        share.WhatsAppUrl.Should().StartWith("https://wa.me/919123456780?text=");
+        share.MailtoUrl.Should().StartWith("mailto:john%40example.com?subject=");
+        Uri.UnescapeDataString(share.WhatsAppUrl["https://wa.me/919123456780?text=".Length..])
+            .Should().Be(share.Message);
+    }
+
+    [Fact]
+    public async Task The_share_figures_come_from_the_server_and_ignore_anything_posted()
+    {
+        var (owner, quotation) = await NewQuotationAsync();
+
+        // A caller trying to dictate the number, the total or the business name gets none of it:
+        // the endpoint reads only the route id and the authenticated user.
+        var response = await owner.PostAsJsonAsync($"/api/quotations/{quotation.Id}/public-link", new
+        {
+            quotationNumber = "QT-999999",
+            grandTotal = 1m,
+            businessName = "Somebody Else",
+            url = "https://evil.example/q/attacker"
+        });
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var share = (await response.Content.ReadFromJsonAsync<PublicQuotationLinkDto>())!.Share;
+
+        share.Message.Should().Contain(quotation.QuotationNumber).And.Contain("Test Business");
+        share.Message.Should().Contain("\u20b912,980.00");
+        share.Message.Should().NotContain("QT-999999")
+            .And.NotContain("Somebody Else")
+            .And.NotContain("evil.example");
+        share.Url.Should().StartWith("http://localhost:3000/q/");
+    }
+
+    [Fact]
+    public async Task The_share_material_carries_no_internal_identifiers_or_payment_information()
+    {
+        var (owner, quotation) = await NewQuotationAsync();
+
+        var link = await CreateLinkDtoAsync(owner, quotation.Id);
+        var share = link.Share;
+        var everything = string.Join('\n',
+            share.Url, share.Message, share.EmailSubject, share.WhatsAppUrl, share.MailtoUrl);
+
+        everything.Should().NotContain(quotation.Id.ToString());
+        everything.Should().NotContain(quotation.Customer.Id.ToString());
+        everything.Should().NotContain(PublicTokenGenerator.Hash(TokenFrom(link.Url)));
+
+        // A quotation is not a bill. Nothing here may invite or describe a payment.
+        foreach (var word in new[] { "razorpay", "payment", "pay ", "outstanding", "order_id" })
+            everything.ToLowerInvariant().Should().NotContain(word);
+    }
+
+    [Fact]
+    public async Task Re_sharing_returns_material_for_the_new_link_and_retires_the_old_one()
+    {
+        var (owner, quotation) = await NewQuotationAsync();
+
+        var first = await CreateLinkDtoAsync(owner, quotation.Id);
+        var second = await CreateLinkDtoAsync(owner, quotation.Id);
+
+        second.Url.Should().NotBe(first.Url);
+        second.Share.Url.Should().Be(second.Url);
+        second.Share.Message.Should().Contain(second.Url).And.NotContain(TokenFrom(first.Url));
+
+        var anonymous = Anonymous(_factory);
+        (await anonymous.GetAsync($"/api/public/quotations/{TokenFrom(first.Url)}"))
+            .StatusCode.Should().Be(HttpStatusCode.NotFound);
+        (await anonymous.GetAsync($"/api/public/quotations/{TokenFrom(second.Url)}"))
+            .StatusCode.Should().Be(HttpStatusCode.OK);
+    }
+
+    [Fact]
+    public async Task A_customer_with_no_phone_or_email_still_yields_a_usable_share()
+    {
+        var owner = await _factory.CreateSignedInClientAsync();
+        var customer = await (await owner.PostAsJsonAsync("/api/customers", new { name = "Anon" }))
+            .Content.ReadFromJsonAsync<CustomerDto>();
+        var quotation = await (await owner.PostAsJsonAsync("/api/quotations", Payload(customer!.Id)))
+            .Content.ReadFromJsonAsync<QuotationDto>();
+
+        var share = (await CreateLinkDtoAsync(owner, quotation!.Id)).Share;
+
+        share.CustomerPhone.Should().BeNull();
+        share.CustomerEmail.Should().BeNull();
+        share.WhatsAppUrl.Should().StartWith("https://wa.me/?text=");
+        share.MailtoUrl.Should().StartWith("mailto:?subject=");
+        share.Message.Should().Contain(share.Url);
+    }
+
+    [Fact]
+    public async Task A_link_cannot_be_created_for_a_quotation_that_does_not_exist()
+    {
+        var owner = await _factory.CreateSignedInClientAsync();
+
+        var response = await owner.PostAsync($"/api/quotations/{Guid.NewGuid()}/public-link", null);
 
         response.StatusCode.Should().Be(HttpStatusCode.NotFound);
     }

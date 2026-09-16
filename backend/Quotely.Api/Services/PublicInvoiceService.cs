@@ -255,8 +255,13 @@ public class PublicInvoiceService : IPublicInvoiceService
         var business = await LoadBusinessAsync(invoice.UserId, ct);
         var summary = await _payments.GetSummaryAsync(invoice.Id, ct);
 
+        // THE RULE, as InvoiceLedger states it: captured and not voided. The summary above already
+        // excludes voided rows, so listing them here would show a customer payments that visibly
+        // do not add up to the balance they are being asked to settle.
         var settled = await _db.Payments.AsNoTracking()
-            .Where(p => p.InvoiceId == invoice.Id && p.Status == PaymentStatus.Captured)
+            .Where(p => p.InvoiceId == invoice.Id
+                        && p.Status == PaymentStatus.Captured
+                        && p.VoidedAt == null)
             .OrderByDescending(p => p.PaidAt)
             .Select(p => new PublicPaymentDto
             {

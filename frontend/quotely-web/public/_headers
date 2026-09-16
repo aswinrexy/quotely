@@ -1,0 +1,11 @@
+# Security headers for the Quotely web app on Cloudflare Pages.
+#
+# The app holds a JWT and displays financial documents, so the cheap browser-side protections are
+# worth having. HSTS is not set here: Cloudflare already serves *.pages.dev over HTTPS only, and
+# committing to HSTS is a decision for a custom domain, not a platform subdomain.
+
+/*
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: strict-origin-when-cross-origin
+  X-Frame-Options: DENY
+  Permissions-Policy: camera=(), microphone=(), geolocation=(), payment=()

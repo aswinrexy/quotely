@@ -24,14 +24,22 @@ public class AppDbContext : IdentityDbContext<AppUser, IdentityRole<Guid>, Guid>
     /// Neither SQL Server's datetime2 nor SQLite stores a timezone, so values read back arrive as
     /// DateTimeKind.Unspecified and serialize without a "Z" — which a browser then reads as local
     /// time, shifting displayed dates. Everything we store is UTC, so say so on the way out.
+    ///
+    /// Going in, the value is forced to a UTC kind as well. On SQL Server and SQLite the kind is
+    /// merely ignored, but PostgreSQL's timestamptz rejects anything that is not Utc outright —
+    /// so normalising here is what lets one model serve all three engines.
     /// </summary>
     private static readonly ValueConverter<DateTime, DateTime> UtcConverter = new(
-        toDatabase => toDatabase.Kind == DateTimeKind.Local ? toDatabase.ToUniversalTime() : toDatabase,
+        toDatabase => toDatabase.Kind == DateTimeKind.Unspecified
+            ? DateTime.SpecifyKind(toDatabase, DateTimeKind.Utc)
+            : toDatabase.ToUniversalTime(),
         fromDatabase => DateTime.SpecifyKind(fromDatabase, DateTimeKind.Utc));
 
     private static readonly ValueConverter<DateTime?, DateTime?> NullableUtcConverter = new(
-        toDatabase => toDatabase.HasValue && toDatabase.Value.Kind == DateTimeKind.Local
-            ? toDatabase.Value.ToUniversalTime()
+        toDatabase => toDatabase.HasValue
+            ? (toDatabase.Value.Kind == DateTimeKind.Unspecified
+                ? DateTime.SpecifyKind(toDatabase.Value, DateTimeKind.Utc)
+                : toDatabase.Value.ToUniversalTime())
             : toDatabase,
         fromDatabase => fromDatabase.HasValue
             ? DateTime.SpecifyKind(fromDatabase.Value, DateTimeKind.Utc)
@@ -178,9 +186,15 @@ public class AppDbContext : IdentityDbContext<AppUser, IdentityRole<Guid>, Guid>
             e.Property(x => x.Amount).HasPrecision(18, 2);
             e.Property(x => x.Currency).HasMaxLength(3).IsRequired();
             e.Property(x => x.Provider).HasMaxLength(30).IsRequired();
-            e.Property(x => x.ProviderOrderId).HasMaxLength(80).IsRequired();
+            // Nullable since V2.5: a manual payment has no provider order behind it.
+            e.Property(x => x.ProviderOrderId).HasMaxLength(80);
             e.Property(x => x.ProviderPaymentId).HasMaxLength(80);
             e.Property(x => x.Method).HasMaxLength(40);
+            e.Property(x => x.Reference).HasMaxLength(100);
+            e.Property(x => x.Notes).HasMaxLength(500);
+            // Reading the ledger always asks for captured, non-voided rows on one invoice, so the
+            // existing (InvoiceId, Status) index is extended to cover the void check too.
+            e.HasIndex(x => new { x.InvoiceId, x.Status, x.VoidedAt });
             e.Property(x => x.CustomerName).HasMaxLength(200);
             e.Property(x => x.CustomerEmail).HasMaxLength(256);
             e.Property(x => x.FailureReason).HasMaxLength(500);

@@ -18,6 +18,19 @@ public interface IPaymentService
     /// </summary>
     Task<Payment> ProcessOutcomeAsync(PaymentOutcome outcome, CancellationToken ct = default);
 
+    /// <summary>
+    /// Records money the business received outside the gateway. The second way into the ledger,
+    /// and the only other one: it ends at the same recalculation as a provider outcome does.
+    /// </summary>
+    Task<PaymentDto> RecordManualPaymentAsync(
+        Guid userId, Guid invoiceId, RecordManualPaymentRequest request, CancellationToken ct = default);
+
+    /// <summary>
+    /// Stops a manual payment counting toward the invoice balance, without deleting it. Gateway
+    /// payments are refused: their record belongs to the provider.
+    /// </summary>
+    Task<PaymentDto> VoidPaymentAsync(Guid userId, Guid invoiceId, Guid paymentId, CancellationToken ct = default);
+
     Task<PaymentSummaryDto> GetSummaryAsync(Guid invoiceId, CancellationToken ct = default);
     Task<InvoicePaymentsDto> GetInvoicePaymentsAsync(Guid userId, Guid invoiceId, CancellationToken ct = default);
 
@@ -98,7 +111,7 @@ public class PaymentService : IPaymentService
                         live.ProviderOrderId, invoice.Id);
 
                     return (live, new ProviderOrder(
-                        live.ProviderOrderId, _provider.ToMinorUnits(live.Amount), live.Currency));
+                        RequireProviderOrderId(live), _provider.ToMinorUnits(live.Amount), live.Currency));
                 }
 
                 // The balance moved under it — a part payment landed — so the stale order is
@@ -164,7 +177,7 @@ public class PaymentService : IPaymentService
                     invoice.Id, winner.ProviderOrderId);
 
                 return (winner, new ProviderOrder(
-                    winner.ProviderOrderId, _provider.ToMinorUnits(winner.Amount), winner.Currency));
+                    RequireProviderOrderId(winner), _provider.ToMinorUnits(winner.Amount), winner.Currency));
             }
 
             _logger.LogInformation(
@@ -174,6 +187,16 @@ public class PaymentService : IPaymentService
             return (payment, order);
         });
     }
+
+    /// <summary>
+    /// A reservation is only ever taken by a gateway attempt, which always has a provider order —
+    /// manual payments never reserve. ProviderOrderId became nullable in V2.5 for their sake, so
+    /// this states the invariant where a reservation is read back rather than assuming it.
+    /// </summary>
+    private static string RequireProviderOrderId(Payment payment) =>
+        payment.ProviderOrderId
+        ?? throw new InvalidOperationException(
+            $"Payment {payment.Id} holds a reservation but has no provider order id.");
 
     /// <summary>
     /// Frees reservations that have lapsed. An untouched order holds the balance only briefly;
@@ -364,6 +387,154 @@ public class PaymentService : IPaymentService
         return payment;
     }
 
+    // ---- manual payments (V2.5) -----------------------------------------
+
+    /// <summary>
+    /// Records money received outside the gateway. This is the ledger's second entrance, and it
+    /// deliberately shares everything past the front door with the first: the same Payment table,
+    /// the same Captured status, and the same <see cref="RecalculateInvoiceAsync"/>. There is no
+    /// separate manual balance anywhere in the system.
+    ///
+    /// The amount the owner types is checked against a balance the server computes from records,
+    /// so the browser cannot cause an invoice to be over-collected by sending a larger number.
+    /// </summary>
+    public async Task<PaymentDto> RecordManualPaymentAsync(
+        Guid userId, Guid invoiceId, RecordManualPaymentRequest request, CancellationToken ct = default)
+    {
+        // Ownership first. Another tenant's invoice is a 404 exactly as an unknown id would be.
+        var invoice = await _db.Invoices.FirstOrDefaultAsync(i => i.Id == invoiceId && i.UserId == userId, ct)
+                      ?? throw ApiException.NotFound("Invoice");
+
+        if (invoice.Status == InvoiceStatus.Draft)
+            throw ApiException.Conflict(
+                $"{invoice.InvoiceNumber} has not been issued yet, so it cannot take a payment.");
+
+        if (invoice.Status == InvoiceStatus.Cancelled)
+            throw ApiException.Conflict(
+                $"{invoice.InvoiceNumber} has been cancelled and cannot take a payment.");
+
+        var method = ManualPaymentMethods.Normalise(request.Method)
+                     ?? throw ApiException.BadRequest(
+                         $"\"{request.Method}\" is not a payment method. Use one of: {ManualPaymentMethods.Describe()}.");
+
+        if (request.Amount <= 0)
+            throw ApiException.BadRequest("A payment amount must be greater than zero.");
+
+        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+        var paymentDate = request.PaymentDate ?? today;
+
+        // Back-dating is normal — last week's cash gets entered today. Forward-dating is not:
+        // that money has not been received, and recording it would overstate what is collected.
+        //
+        // The bound is UTC tomorrow rather than UTC today, because "today" is a local idea. A
+        // business in Chennai recording a cash payment at 1am is on a calendar date UTC has not
+        // reached, and rejecting that would have made the app look broken every night between
+        // midnight and 05:30 — which is exactly what it did before this line said so. No timezone
+        // is further ahead than UTC+14, so a local date can never be more than one day ahead of a
+        // UTC one: this admits every real owner and nothing beyond them.
+        if (paymentDate > today.AddDays(1))
+            throw ApiException.BadRequest("A payment date cannot be in the future.");
+
+        var strategy = _db.Database.CreateExecutionStrategy();
+
+        return await strategy.ExecuteAsync(async () =>
+        {
+            // Computed here, from the ledger, at the moment of writing — never taken from the
+            // request, and re-read inside the transaction so a gateway payment landing at the
+            // same time is already accounted for.
+            await using var transaction = await _db.Database.BeginTransactionAsync(ct);
+
+            var paid = await CapturedTotalAsync(invoice.Id, ct);
+            var outstanding = Math.Max(0m, invoice.GrandTotal - paid);
+
+            if (outstanding <= 0)
+                throw ApiException.BadRequest(
+                    $"{invoice.InvoiceNumber} is already paid in full.");
+
+            if (request.Amount > outstanding)
+                throw ApiException.BadRequest(
+                    $"That is more than the {outstanding:N2} {invoice.Currency} still outstanding on {invoice.InvoiceNumber}.");
+
+            var payment = new Payment
+            {
+                Id = Guid.NewGuid(),
+                InvoiceId = invoice.Id,
+                UserId = userId,
+                Amount = request.Amount,
+                Currency = invoice.Currency,
+                // Captured immediately: unlike a gateway payment there is nothing left to confirm.
+                // The owner is telling us money they already hold arrived.
+                Status = PaymentStatus.Captured,
+                Source = PaymentSource.Manual,
+                Provider = PaymentProviders.Manual,
+                // Genuinely no provider order and no provider payment — not a placeholder.
+                ProviderOrderId = null,
+                ProviderPaymentId = null,
+                Method = method,
+                Reference = string.IsNullOrWhiteSpace(request.Reference) ? null : request.Reference.Trim(),
+                Notes = string.IsNullOrWhiteSpace(request.Notes) ? null : request.Notes.Trim(),
+                // Manual payments never reserve: there is no checkout window to hold open.
+                ReservationSlot = null,
+                CustomerName = invoice.CustomerName,
+                CustomerEmail = invoice.CustomerEmail,
+                PaidAt = paymentDate.ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc)
+            };
+
+            _db.Payments.Add(payment);
+            await _db.SaveChangesAsync(ct);
+            await transaction.CommitAsync(ct);
+
+            _logger.LogInformation(
+                "Recorded manual {Method} payment of {Amount} {Currency} for invoice {InvoiceId}",
+                method, payment.Amount, payment.Currency, invoice.Id);
+
+            // The same recalculation a Razorpay capture triggers. One path, one set of totals.
+            await RecalculateInvoiceAsync(invoice.Id, ct);
+
+            return Map(payment);
+        });
+    }
+
+    /// <summary>
+    /// Stops a manual payment counting, keeping the row as an audit record. The invoice is then
+    /// recalculated through the one shared path, so a voided payment simply stops contributing —
+    /// a fully paid invoice can go back to partially paid, or back to owing the whole amount.
+    /// </summary>
+    public async Task<PaymentDto> VoidPaymentAsync(
+        Guid userId, Guid invoiceId, Guid paymentId, CancellationToken ct = default)
+    {
+        var invoice = await _db.Invoices.AsNoTracking()
+                          .FirstOrDefaultAsync(i => i.Id == invoiceId && i.UserId == userId, ct)
+                      ?? throw ApiException.NotFound("Invoice");
+
+        // Scoped by invoice as well as tenant, so a payment id from another invoice — even one the
+        // caller owns — cannot be voided through this invoice's route.
+        var payment = await _db.Payments
+                          .FirstOrDefaultAsync(p => p.Id == paymentId
+                                                    && p.InvoiceId == invoice.Id
+                                                    && p.UserId == userId, ct)
+                      ?? throw ApiException.NotFound("Payment");
+
+        if (payment.Source != PaymentSource.Manual)
+            throw ApiException.Conflict(
+                "This payment was collected online and cannot be voided here. Refund it through your payment provider instead.");
+
+        if (payment.IsVoided)
+            throw ApiException.Conflict("This payment has already been voided.");
+
+        payment.VoidedAt = DateTime.UtcNow;
+        payment.ConcurrencyStamp = Guid.NewGuid();
+        await _db.SaveChangesAsync(ct);
+
+        _logger.LogInformation(
+            "Voided manual payment {PaymentId} of {Amount} {Currency} on invoice {InvoiceId}",
+            payment.Id, payment.Amount, payment.Currency, invoice.Id);
+
+        await RecalculateInvoiceAsync(invoice.Id, ct);
+
+        return Map(payment);
+    }
+
     // ---- financial state ------------------------------------------------
 
     /// <summary>
@@ -377,18 +548,30 @@ public class PaymentService : IPaymentService
 
         var paid = await CapturedTotalAsync(invoiceId, ct);
 
-        // Existing invoices carry a status the owner set by hand, and V2.2's rules still apply.
-        // Payments only take over once money has actually arrived, so an invoice nobody has paid
-        // keeps whatever status its owner chose.
-        if (paid > 0 && invoice.Status != InvoiceStatus.Cancelled)
+        // A cancelled invoice is void and keeps that status whatever the ledger says.
+        if (invoice.Status != InvoiceStatus.Cancelled)
         {
-            var next = paid >= invoice.GrandTotal ? InvoiceStatus.Paid : InvoiceStatus.PartiallyPaid;
-            if (invoice.Status != next)
+            InvoiceStatus? next = null;
+
+            if (paid > 0)
+            {
+                next = paid >= invoice.GrandTotal ? InvoiceStatus.Paid : InvoiceStatus.PartiallyPaid;
+            }
+            else if (invoice.Status is InvoiceStatus.Paid or InvoiceStatus.PartiallyPaid)
+            {
+                // Nothing counts any more — every payment was voided. The invoice must not keep
+                // claiming it was paid, so it returns to being issued and awaiting payment.
+                // Only the two payment-derived statuses are rewound: an invoice the owner set by
+                // hand to something else keeps their choice, as V2.2 intended.
+                next = InvoiceStatus.Sent;
+            }
+
+            if (next is not null && invoice.Status != next)
             {
                 _logger.LogInformation(
                     "Invoice {InvoiceId} moves {From} → {To} ({Paid} of {Total} {Currency})",
                     invoiceId, invoice.Status, next, paid, invoice.GrandTotal, invoice.Currency);
-                invoice.Status = next;
+                invoice.Status = next.Value;
                 await _db.SaveChangesAsync(ct);
             }
         }
@@ -432,7 +615,7 @@ public class PaymentService : IPaymentService
         {
             Summary = Summarise(
                 invoice,
-                payments.Where(p => p.Status == PaymentStatus.Captured).Sum(p => p.Amount),
+                payments.Where(p => p.CountsTowardPaid).Sum(p => p.Amount),
                 payments.Any(p => p.Status == PaymentStatus.Pending)),
             Payments = payments.Select(Map).ToList()
         };
@@ -440,11 +623,13 @@ public class PaymentService : IPaymentService
 
     // ---- helpers --------------------------------------------------------
 
-    /// <summary>The paid amount, always summed from captured rows — never read from a column.</summary>
-    private async Task<decimal> CapturedTotalAsync(Guid invoiceId, CancellationToken ct) =>
-        await _db.Payments.AsNoTracking()
-            .Where(p => p.InvoiceId == invoiceId && p.Status == PaymentStatus.Captured)
-            .SumAsync(p => (decimal?)p.Amount, ct) ?? 0m;
+    /// <summary>
+    /// The paid amount, always summed from the rows that count — never read from a column, and
+    /// never defined twice. <see cref="InvoiceLedger.PaidTotalAsync"/> is the single definition:
+    /// captured, and not voided.
+    /// </summary>
+    private Task<decimal> CapturedTotalAsync(Guid invoiceId, CancellationToken ct) =>
+        InvoiceLedger.PaidTotalAsync(_db, invoiceId, ct);
 
     private Task<bool> HasPendingAsync(Guid invoiceId, CancellationToken ct) =>
         _db.Payments.AsNoTracking()
@@ -490,12 +675,19 @@ public class PaymentService : IPaymentService
         Amount = p.Amount,
         Currency = p.Currency,
         Status = p.Status.ToString(),
+        Source = p.Source.ToString(),
         Provider = p.Provider,
-        Reference = p.ProviderPaymentId,
+        // A gateway payment is identified by the provider's reference; a manual one by whatever
+        // the owner wrote down. One field, because the history shows them in one list.
+        Reference = p.Source == PaymentSource.Manual ? p.Reference : p.ProviderPaymentId,
         OrderReference = p.ProviderOrderId,
         Method = p.Method,
+        Notes = p.Notes,
         FailureReason = p.FailureReason,
         PaidAt = p.PaidAt,
-        CreatedAt = p.CreatedAt
+        CreatedAt = p.CreatedAt,
+        VoidedAt = p.VoidedAt,
+        IsVoided = p.IsVoided,
+        CanVoid = p.CanBeVoided
     };
 }

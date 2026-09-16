@@ -130,7 +130,7 @@ export default function InvoicesPage() {
         </div>
 
         {loading ? (
-          <TableSkeleton rows={6} columns={6} />
+          <TableSkeleton rows={6} columns={7} />
         ) : error ? (
           <ErrorState message={error} onRetry={load} />
         ) : isEmpty ? (
@@ -169,6 +169,7 @@ export default function InvoicesPage() {
                     <Th>Due</Th>
                     <Th>Status</Th>
                     <Th align="right">Amount</Th>
+                    <Th align="right">Outstanding</Th>
                     <Th align="right">Actions</Th>
                   </tr>
                 </thead>
@@ -199,6 +200,13 @@ export default function InvoicesPage() {
                       </Td>
                       <Td align="right">
                         <Amount>{formatMoney(invoice.grandTotal, invoice.currency)}</Amount>
+                      </Td>
+                      <Td align="right">
+                        {invoice.outstanding > 0 ? (
+                          <Amount>{formatMoney(invoice.outstanding, invoice.currency)}</Amount>
+                        ) : (
+                          <span className="text-caption text-fog">Paid</span>
+                        )}
                       </Td>
                       <Td align="right">
                         <div className="flex justify-end gap-1">
@@ -248,7 +256,15 @@ export default function InvoicesPage() {
                         label: "Amount",
                         value: <Amount>{formatMoney(invoice.grandTotal, invoice.currency)}</Amount>,
                       },
-                      { label: "Issued", value: formatDate(invoice.invoiceDate) },
+                      {
+                        label: "Outstanding",
+                        value:
+                          invoice.outstanding > 0 ? (
+                            <Amount>{formatMoney(invoice.outstanding, invoice.currency)}</Amount>
+                          ) : (
+                            "Paid"
+                          ),
+                      },
                       {
                         label: "Due",
                         value: invoice.isOverdue ? (

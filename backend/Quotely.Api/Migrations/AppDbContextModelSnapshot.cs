@@ -596,6 +596,10 @@ namespace Quotely.Api.Migrations
                         .HasMaxLength(40)
                         .HasColumnType("nvarchar(40)");
 
+                    b.Property<string>("Notes")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
                     b.Property<DateTime?>("PaidAt")
                         .HasColumnType("datetime2");
 
@@ -605,7 +609,6 @@ namespace Quotely.Api.Migrations
                         .HasColumnType("nvarchar(30)");
 
                     b.Property<string>("ProviderOrderId")
-                        .IsRequired()
                         .HasMaxLength(80)
                         .HasColumnType("nvarchar(80)");
 
@@ -613,8 +616,15 @@ namespace Quotely.Api.Migrations
                         .HasMaxLength(80)
                         .HasColumnType("nvarchar(80)");
 
+                    b.Property<string>("Reference")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
                     b.Property<Guid?>("ReservationSlot")
                         .HasColumnType("uniqueidentifier");
+
+                    b.Property<int>("Source")
+                        .HasColumnType("int");
 
                     b.Property<int>("Status")
                         .HasColumnType("int");
@@ -624,6 +634,9 @@ namespace Quotely.Api.Migrations
 
                     b.Property<Guid>("UserId")
                         .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("VoidedAt")
+                        .HasColumnType("datetime2");
 
                     b.HasKey("Id");
 
@@ -642,6 +655,8 @@ namespace Quotely.Api.Migrations
                     b.HasIndex("InvoiceId", "Status");
 
                     b.HasIndex("UserId", "CreatedAt");
+
+                    b.HasIndex("InvoiceId", "Status", "VoidedAt");
 
                     b.ToTable("Payments");
                 });

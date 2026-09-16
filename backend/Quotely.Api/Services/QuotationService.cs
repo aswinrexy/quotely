@@ -8,7 +8,9 @@ namespace Quotely.Api.Services;
 
 public interface IQuotationService
 {
-    Task<PagedResult<QuotationListItemDto>> ListAsync(Guid userId, string? search, string? status, int page, int pageSize, CancellationToken ct = default);
+    Task<PagedResult<QuotationListItemDto>> ListAsync(
+        Guid userId, string? search, string? status, int page, int pageSize,
+        Guid? customerId = null, CancellationToken ct = default);
     Task<QuotationDto> GetAsync(Guid userId, Guid id, CancellationToken ct = default);
     Task<QuotationDto> CreateAsync(Guid userId, SaveQuotationRequest request, CancellationToken ct = default);
     Task<QuotationDto> UpdateAsync(Guid userId, Guid id, SaveQuotationRequest request, CancellationToken ct = default);
@@ -24,7 +26,8 @@ public class QuotationService : IQuotationService
     public QuotationService(AppDbContext db) => _db = db;
 
     public async Task<PagedResult<QuotationListItemDto>> ListAsync(
-        Guid userId, string? search, string? status, int page, int pageSize, CancellationToken ct = default)
+        Guid userId, string? search, string? status, int page, int pageSize,
+        Guid? customerId = null, CancellationToken ct = default)
     {
         page = Math.Max(page, 1);
         pageSize = Math.Clamp(pageSize, 1, 100);
@@ -43,6 +46,12 @@ public class QuotationService : IQuotationService
 
         if (!string.IsNullOrWhiteSpace(status) && Enum.TryParse<QuotationStatus>(status, true, out var parsed))
             query = query.Where(q => q.Status == parsed);
+
+        // Filtered in the database so a customer's page shows all of their quotations. It used to
+        // request page one of everything and filter in the browser, which silently dropped any
+        // customer whose quotations fell past that first page.
+        if (customerId is not null)
+            query = query.Where(q => q.CustomerId == customerId);
 
         var total = await query.CountAsync(ct);
         var currency = await GetCurrencyAsync(userId, ct);

@@ -54,7 +54,7 @@ AppUser (Identity)
  └── Invoice           (1:N)   ← two creation paths, one entity
         ├── Customer       (N:1, restrict delete — navigation only)
         ├── InvoiceItem    (1:N, cascade delete)
-        └── Payment        (1:N, cascade delete)
+        └── Payment        (1:N, cascade delete — Gateway or Manual)
 
 WebhookEvent          (standalone — provider event idempotency)
 ```
@@ -91,6 +91,7 @@ Indexes:
 | InvoiceItems | `InvoiceId` | item loading |
 | Invoices | `PublicTokenHash` unique, filtered | payment-link lookup |
 | Payments | `ProviderPaymentId` unique, filtered | one provider payment, one record — enforced by the database |
+| Payments | `(InvoiceId, Status, VoidedAt)` | the ledger read: captured, non-voided rows for one invoice |
 | Payments | `ProviderOrderId` | order lookup; not unique, because an order may be retried |
 | Payments | `InvoiceId`, `(InvoiceId, Status)` | summing captured payments |
 | Payments | `(UserId, CreatedAt)` | tenant-scoped history |
@@ -98,6 +99,69 @@ Indexes:
 
 Money uses `decimal(18,2)`, quantities `decimal(18,3)` and tax rates `decimal(5,2)`. No monetary
 value is ever a `float` or `double`, in the database or in C#.
+
+## The payment ledger (V2.3 → V2.5)
+
+One table, two entrances, one calculation.
+
+```
+   Razorpay capture                    Owner records cash
+   (webhook / checkout)                (POST …/payments)
+           │                                   │
+  ProcessOutcomeAsync()              RecordManualPaymentAsync()
+           │                                   │
+           └──────────────┬────────────────────┘
+                          ▼
+                    Payments table
+              Source = Gateway | Manual
+                          ▼
+              RecalculateInvoiceAsync()
+                          ▼
+            Draft · Sent · PartiallyPaid · Paid
+```
+
+`Payment.Source` is an explicit column rather than something inferred from the provider string,
+because "only a manual payment may be voided" has to be unambiguous in a query and in an
+authorization check. A manual payment has `ProviderOrderId` and `ProviderPaymentId` genuinely null
+— not a placeholder, which would make "has no order" indistinguishable from "we failed to record
+one" — and is written as `Captured` immediately, since the owner is reporting money they already
+hold.
+
+**Voiding never deletes.** `VoidedAt` is set, the row stays, and it stops counting. That is the
+whole mechanism: a voided payment is excluded by the ledger rule, and the invoice recalculates
+through the same path everything else uses, so a `Paid` invoice can fall back to `PartiallyPaid` or
+to `Sent`.
+
+### InvoiceLedger — one definition of "paid"
+
+`InvoiceLedger` is where the rule lives:
+
+> A payment counts toward an invoice when it is **Captured** and **has not been voided**.
+
+Everything that asks a money question composes from it — the invoice detail, the invoice list, the
+overdue filter, the dashboard receivables and the customer summary. The rule appears there in
+several mechanical forms (a filter, two scalar projections, a row projection, a single-invoice
+lookup) because EF Core needs the subquery written inline at each point and cannot inline a shared
+`Expression`; they sit adjacent in one file, and `Payment.CountsTowardPaid` is the in-memory twin.
+
+V2.5 began with a second copy of this sum living privately in `InvoiceService`. It was harmless
+until voiding existed, at which point the invoice detail disagreed with the ledger — the test suite
+caught it immediately. That is why there is now one place.
+
+Everything composes as `IQueryable`, so the sums and filters run in SQL. The dashboard never pages
+invoices into the browser to add them up.
+
+### Overdue is derived, never stored
+
+`InvoiceStatus.Overdue` exists in the enum and is deliberately never assigned. An invoice reads as
+overdue when it is issued, not cancelled, past its due date and still owing something — evaluated
+per request.
+
+Deriving it means an invoice becomes overdue because the date rolled over: no scheduler, no nightly
+sweep, no background service, and no stored value that can drift out of step with the calendar.
+Paying in full stops it being overdue on the very next read; voiding that payment makes it overdue
+again. The enum member is kept because removing it would change the API's status vocabulary and
+break an invoice an owner had set to `Overdue` by hand under V2.2 rules.
 
 ## Invoice sharing (V2.4)
 
