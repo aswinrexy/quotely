@@ -26,21 +26,62 @@ public record PaymentSummaryDto
     public bool HasPendingPayment { get; init; }
 }
 
-/// <summary>One payment attempt, as shown to the business owner. Carries no sensitive data.</summary>
+/// <summary>One payment, as shown to the business owner. Carries no sensitive data.</summary>
 public record PaymentDto
 {
     public Guid Id { get; init; }
     public decimal Amount { get; init; }
     public string Currency { get; init; } = "INR";
     public string Status { get; init; } = nameof(PaymentStatus.Created);
+    /// <summary>"Gateway" or "Manual" — what the history badges the row with.</summary>
+    public string Source { get; init; } = nameof(PaymentSource.Gateway);
     public string Provider { get; init; } = string.Empty;
-    /// <summary>The provider's payment reference, safe to display and to quote in support.</summary>
+    /// <summary>
+    /// For a gateway payment, the provider's payment reference. For a manual one, whatever the
+    /// owner typed — a cheque number or a bank UTR.
+    /// </summary>
     public string? Reference { get; init; }
     public string? OrderReference { get; init; }
     public string? Method { get; init; }
+    /// <summary>The owner's own note. Manual payments only; never shown to a customer.</summary>
+    public string? Notes { get; init; }
     public string? FailureReason { get; init; }
     public DateTime? PaidAt { get; init; }
     public DateTime CreatedAt { get; init; }
+
+    // ---- voiding (V2.5) ----
+    public DateTime? VoidedAt { get; init; }
+    public bool IsVoided { get; init; }
+    /// <summary>True only for a manual payment that still stands, so the UI shows one Void action.</summary>
+    public bool CanVoid { get; init; }
+}
+
+/// <summary>
+/// Money the business received outside the gateway — cash, a bank transfer, a UPI transfer, a
+/// cheque. Note what is absent: any total, balance or status. The server derives the outstanding
+/// balance from the ledger and validates this amount against it.
+/// </summary>
+public record RecordManualPaymentRequest
+{
+    /// <summary>Must be greater than zero and no more than the current outstanding balance.</summary>
+    [Range(0.01, 999_999_999)]
+    public decimal Amount { get; init; }
+
+    /// <summary>One of: cash, bank_transfer, upi, cheque, other.</summary>
+    [Required, MaxLength(40)]
+    public string Method { get; init; } = ManualPaymentMethods.Cash;
+
+    /// <summary>
+    /// When the money actually arrived. Back-dating is allowed and expected — an owner records
+    /// last week's cash today — but a future date is not, since that money has not been received.
+    /// Defaults to today when omitted.
+    /// </summary>
+    public DateOnly? PaymentDate { get; init; }
+
+    /// <summary>Cheque number, bank UTR, or whatever the owner reconciles against. Optional.</summary>
+    [MaxLength(100)] public string? Reference { get; init; }
+
+    [MaxLength(500)] public string? Notes { get; init; }
 }
 
 public record InvoicePaymentsDto

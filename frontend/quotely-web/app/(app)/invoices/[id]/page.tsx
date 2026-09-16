@@ -24,6 +24,7 @@ import {
   PaymentHistoryCard,
   InvoiceShareCard,
 } from "@/components/app/invoice-payments-card";
+import { RecordPaymentDialog } from "@/components/app/record-payment-dialog";
 import { INVOICE_STATUS_LABELS, type Invoice, type InvoicePayments } from "@/types";
 
 export default function InvoiceDetailPage() {
@@ -37,6 +38,7 @@ export default function InvoiceDetailPage() {
   const [downloading, setDownloading] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [recording, setRecording] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -130,6 +132,11 @@ export default function InvoiceDetailPage() {
   // money of its own.
   const paid = invoice.paid;
   const outstanding = invoice.outstanding;
+
+  // A draft has not been issued and a cancelled invoice is void, so neither takes a payment —
+  // the same rule the server enforces, mirrored here only to avoid offering a doomed action.
+  const canRecordPayment =
+    outstanding > 0 && invoice.status !== "Draft" && invoice.status !== "Cancelled";
 
   return (
     <>
@@ -261,7 +268,18 @@ export default function InvoiceDetailPage() {
               </div>
 
               <div className="grid gap-2">
-                <Button onClick={download} loading={downloading}>
+                {canRecordPayment && (
+                  <Button onClick={() => setRecording(true)}>
+                    <Icon.check className="h-4 w-4" />
+                    Record payment
+                  </Button>
+                )}
+                {/* One near-black primary per surface: recording money outranks a download. */}
+                <Button
+                  variant={canRecordPayment ? "secondary" : "primary"}
+                  onClick={download}
+                  loading={downloading}
+                >
                   <Icon.download className="h-4 w-4" />
                   Download PDF
                 </Button>
@@ -285,7 +303,7 @@ export default function InvoiceDetailPage() {
 
           <InvoiceShareCard invoice={invoice} onChanged={refresh} />
 
-          <PaymentHistoryCard payments={payments} />
+          <PaymentHistoryCard payments={payments} invoiceId={invoice.id} onChanged={refresh} />
 
           {/* What can still be changed, said plainly rather than left for a failed save to reveal. */}
           {(!invoice.canEdit || !invoice.canEditItems) && (
@@ -302,6 +320,13 @@ export default function InvoiceDetailPage() {
           )}
         </div>
       </div>
+
+      <RecordPaymentDialog
+        invoice={invoice}
+        open={recording}
+        onClose={() => setRecording(false)}
+        onRecorded={refresh}
+      />
 
       <ConfirmDialog
         open={confirmDelete}

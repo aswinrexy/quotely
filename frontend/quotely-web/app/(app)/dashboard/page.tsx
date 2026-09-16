@@ -23,7 +23,7 @@ import {
   Th,
   Tr,
 } from "@/components/ui/table";
-import type { DashboardStats, InvoiceListItem, PagedResult, QuotationListItem } from "@/types";
+import type { DashboardStats, PagedResult, QuotationListItem, Receivables } from "@/types";
 
 function greeting(date = new Date()) {
   const hour = date.getHours();
@@ -36,7 +36,7 @@ export default function DashboardPage() {
   const { user } = useAuth();
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [recent, setRecent] = useState<QuotationListItem[]>([]);
-  const [invoices, setInvoices] = useState<InvoiceListItem[]>([]);
+  const [receivables, setReceivables] = useState<Receivables | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -44,14 +44,16 @@ export default function DashboardPage() {
     setLoading(true);
     setError(null);
     try {
-      const [statsResult, recentResult, invoiceResult] = await Promise.all([
+      const [statsResult, recentResult, receivablesResult] = await Promise.all([
         api.get<DashboardStats>("/api/quotations/stats"),
         api.get<PagedResult<QuotationListItem>>("/api/quotations?page=1&pageSize=5"),
-        api.get<PagedResult<InvoiceListItem>>("/api/invoices?page=1&pageSize=100"),
+        // Aggregated by the server. This used to fetch a hundred invoices and add them up here,
+        // which was both wrong past a hundred and the browser deciding what money means.
+        api.get<Receivables>("/api/invoices/stats?needsAttention=5"),
       ]);
       setStats(statsResult);
       setRecent(recentResult.items);
-      setInvoices(invoiceResult.items);
+      setReceivables(receivablesResult);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not load your dashboard.");
     } finally {
@@ -63,15 +65,9 @@ export default function DashboardPage() {
     void load();
   }, [load]);
 
-  const currency = stats?.currency ?? "INR";
+  const currency = receivables?.currency ?? stats?.currency ?? "INR";
   const firstName = (user?.fullName || "").trim().split(" ")[0];
-
-  // Invoice figures are derived here rather than added to the API: the dashboard is the only
-  // caller that needs them, and the existing list endpoint already returns what they require.
-  const invoicedTotal = invoices.reduce((sum, invoice) => sum + invoice.grandTotal, 0);
-  const paidTotal = invoices
-    .filter((invoice) => invoice.status === "Paid")
-    .reduce((sum, invoice) => sum + invoice.grandTotal, 0);
+  const needsAttention = receivables?.needsAttention ?? [];
   const winRate =
     stats && stats.totalQuotations > 0
       ? Math.round((stats.acceptedCount / stats.totalQuotations) * 100)
@@ -102,6 +98,34 @@ export default function DashboardPage() {
       )}
 
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+        {/* Money first: what a small business actually opens the app to find out. */}
+        <StatCard
+          label="Outstanding"
+          value={formatMoney(receivables?.totalOutstanding ?? 0, currency)}
+          context={
+            receivables
+              ? receivables.countOutstanding === 0
+                ? "Nothing owed"
+                : `${receivables.countOutstanding} unpaid ${receivables.countOutstanding === 1 ? "invoice" : "invoices"}`
+              : undefined
+          }
+          accent
+          href="/invoices"
+          loading={loading}
+        />
+        <StatCard
+          label="Overdue"
+          value={formatMoney(receivables?.totalOverdue ?? 0, currency)}
+          context={
+            receivables
+              ? receivables.countOverdue === 0
+                ? "Nothing past due"
+                : `${receivables.countOverdue} past due`
+              : undefined
+          }
+          href="/invoices?status=Overdue"
+          loading={loading}
+        />
         <StatCard
           label="Quotations"
           value={stats ? String(stats.totalQuotations) : "0"}
@@ -113,24 +137,95 @@ export default function DashboardPage() {
           label="Accepted"
           value={stats ? String(stats.acceptedCount) : "0"}
           context={stats && stats.totalQuotations > 0 ? `${winRate}% win rate` : "No quotations yet"}
-          accent
           href="/quotations?status=Accepted"
           loading={loading}
         />
-        <StatCard
-          label="Quoted value"
-          value={formatMoney(stats?.totalValue ?? 0, currency)}
-          context="Across all quotations"
-          loading={loading}
-        />
-        <StatCard
-          label="Invoiced"
-          value={formatMoney(invoicedTotal, currency)}
-          context={`${formatMoney(paidTotal, currency)} paid`}
-          href="/invoices"
-          loading={loading}
-        />
       </div>
+
+      {/* Compact by design: the few invoices worth a phone call today, not a report. */}
+      {!loading && needsAttention.length > 0 && (
+        <Card className="mt-5">
+          <CardHeader
+            title="Needs attention"
+            description="Unpaid invoices, longest overdue first."
+            action={
+              <Link
+                href="/invoices?status=Overdue"
+                className="inline-flex items-center gap-1 text-body font-medium text-electric hover:underline"
+              >
+                View overdue
+                <Icon.chevronRight className="h-3.5 w-3.5" />
+              </Link>
+            }
+          />
+
+          <TableWrap>
+            <Table>
+              <thead>
+                <tr>
+                  <Th>Invoice</Th>
+                  <Th>Customer</Th>
+                  <Th>Due</Th>
+                  <Th align="right">Outstanding</Th>
+                </tr>
+              </thead>
+              <tbody>
+                {needsAttention.map((invoice) => (
+                  <Tr key={invoice.id}>
+                    <Td>
+                      <Link
+                        href={`/invoices/${invoice.id}`}
+                        className="font-medium text-electric hover:underline"
+                      >
+                        <Mono>{invoice.invoiceNumber}</Mono>
+                      </Link>
+                    </Td>
+                    <Td className="text-charcoal">{invoice.customerName}</Td>
+                    <Td>
+                      {formatDate(invoice.dueDate)}
+                      {invoice.isOverdue && (
+                        <span className="ml-1.5 text-caption font-medium text-rose-ink">Past due</span>
+                      )}
+                    </Td>
+                    <Td align="right">
+                      <Amount>{formatMoney(invoice.outstanding, invoice.currency)}</Amount>
+                    </Td>
+                  </Tr>
+                ))}
+              </tbody>
+            </Table>
+          </TableWrap>
+
+          <MobileList>
+            {needsAttention.map((invoice) => (
+              <MobileRow key={invoice.id}>
+                <div className="flex items-start justify-between gap-3">
+                  <Link
+                    href={`/invoices/${invoice.id}`}
+                    className="font-medium text-electric hover:underline"
+                  >
+                    <Mono>{invoice.invoiceNumber}</Mono>
+                  </Link>
+                  <Amount>{formatMoney(invoice.outstanding, invoice.currency)}</Amount>
+                </div>
+                <MobileFacts
+                  items={[
+                    { label: "Customer", value: invoice.customerName },
+                    {
+                      label: "Due",
+                      value: invoice.isOverdue ? (
+                        <span className="text-rose-ink">{formatDate(invoice.dueDate)}</span>
+                      ) : (
+                        formatDate(invoice.dueDate)
+                      ),
+                    },
+                  ]}
+                />
+              </MobileRow>
+            ))}
+          </MobileList>
+        </Card>
+      )}
 
       <Card className="mt-5">
         <CardHeader
