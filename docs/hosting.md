@@ -27,20 +27,21 @@ to justify it; until then the platform domains are real, HTTPS-terminated URLs t
 
 ## Status
 
-**The database exists and is migrated. Nothing else is deployed.**
+**Database and API are live. The web app is not deployed yet.**
 
-| Layer | State |
-| --- | --- |
-| Supabase PostgreSQL | **Created and migrated** — 17 tables, 49 indexes, 19 foreign keys, schema verified |
-| Render API | Not created |
-| Cloudflare Pages | Not created |
-| Razorpay webhook | Not configured — needs the API's public URL first |
+| Layer | State | URL |
+| --- | --- | --- |
+| Supabase PostgreSQL | **Live**, migrated, empty | `ap-southeast-2` (Sydney) |
+| Render API | **Live**, smoke-tested | https://quotely-api-yiul.onrender.com |
+| Health | **Live** | https://quotely-api-yiul.onrender.com/health |
+| Razorpay webhook | Endpoint live, **not yet registered** | https://quotely-api-yiul.onrender.com/api/webhooks/razorpay |
+| Cloudflare Pages | Not created | — |
 
-There are therefore still no live application URLs. Any URL in this document shaped like
-`https://quotely-api.onrender.com` is an **example**, not an address that resolves. Replace them
-with the real ones the platforms hand you, and record them here.
+The API currently deploys from **`feature/v2.6-quotation-sharing`**, not `main`: `main` is still at
+V2.4 and has neither V2.5 nor V2.6. Repoint it to `main` once V2.6 has been released there.
 
-[What you have to do yourself](#what-you-have-to-do-yourself) is the checklist.
+Until the web app exists, `PublicLinks__BaseUrl` and `Cors__AllowedOrigins__0` are placeholders, so
+share links point at a host that does not resolve. That is expected, and step 4 below fixes it.
 
 ---
 
