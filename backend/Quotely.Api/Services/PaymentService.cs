@@ -425,7 +425,14 @@ public class PaymentService : IPaymentService
 
         // Back-dating is normal — last week's cash gets entered today. Forward-dating is not:
         // that money has not been received, and recording it would overstate what is collected.
-        if (paymentDate > today)
+        //
+        // The bound is UTC tomorrow rather than UTC today, because "today" is a local idea. A
+        // business in Chennai recording a cash payment at 1am is on a calendar date UTC has not
+        // reached, and rejecting that would have made the app look broken every night between
+        // midnight and 05:30 — which is exactly what it did before this line said so. No timezone
+        // is further ahead than UTC+14, so a local date can never be more than one day ahead of a
+        // UTC one: this admits every real owner and nothing beyond them.
+        if (paymentDate > today.AddDays(1))
             throw ApiException.BadRequest("A payment date cannot be in the future.");
 
         var strategy = _db.Database.CreateExecutionStrategy();
@@ -617,16 +624,12 @@ public class PaymentService : IPaymentService
     // ---- helpers --------------------------------------------------------
 
     /// <summary>
-    /// The paid amount, always summed from the rows that count — never read from a column. This
-    /// is the in-service form of the rule <see cref="InvoiceLedger.WithBalance"/> expresses for
-    /// bulk queries: captured, and not voided.
+    /// The paid amount, always summed from the rows that count — never read from a column, and
+    /// never defined twice. <see cref="InvoiceLedger.PaidTotalAsync"/> is the single definition:
+    /// captured, and not voided.
     /// </summary>
-    private async Task<decimal> CapturedTotalAsync(Guid invoiceId, CancellationToken ct) =>
-        await _db.Payments.AsNoTracking()
-            .Where(p => p.InvoiceId == invoiceId
-                        && p.Status == PaymentStatus.Captured
-                        && p.VoidedAt == null)
-            .SumAsync(p => (decimal?)p.Amount, ct) ?? 0m;
+    private Task<decimal> CapturedTotalAsync(Guid invoiceId, CancellationToken ct) =>
+        InvoiceLedger.PaidTotalAsync(_db, invoiceId, ct);
 
     private Task<bool> HasPendingAsync(Guid invoiceId, CancellationToken ct) =>
         _db.Payments.AsNoTracking()

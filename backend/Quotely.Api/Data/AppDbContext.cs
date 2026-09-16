@@ -24,14 +24,22 @@ public class AppDbContext : IdentityDbContext<AppUser, IdentityRole<Guid>, Guid>
     /// Neither SQL Server's datetime2 nor SQLite stores a timezone, so values read back arrive as
     /// DateTimeKind.Unspecified and serialize without a "Z" — which a browser then reads as local
     /// time, shifting displayed dates. Everything we store is UTC, so say so on the way out.
+    ///
+    /// Going in, the value is forced to a UTC kind as well. On SQL Server and SQLite the kind is
+    /// merely ignored, but PostgreSQL's timestamptz rejects anything that is not Utc outright —
+    /// so normalising here is what lets one model serve all three engines.
     /// </summary>
     private static readonly ValueConverter<DateTime, DateTime> UtcConverter = new(
-        toDatabase => toDatabase.Kind == DateTimeKind.Local ? toDatabase.ToUniversalTime() : toDatabase,
+        toDatabase => toDatabase.Kind == DateTimeKind.Unspecified
+            ? DateTime.SpecifyKind(toDatabase, DateTimeKind.Utc)
+            : toDatabase.ToUniversalTime(),
         fromDatabase => DateTime.SpecifyKind(fromDatabase, DateTimeKind.Utc));
 
     private static readonly ValueConverter<DateTime?, DateTime?> NullableUtcConverter = new(
-        toDatabase => toDatabase.HasValue && toDatabase.Value.Kind == DateTimeKind.Local
-            ? toDatabase.Value.ToUniversalTime()
+        toDatabase => toDatabase.HasValue
+            ? (toDatabase.Value.Kind == DateTimeKind.Unspecified
+                ? DateTime.SpecifyKind(toDatabase.Value, DateTimeKind.Utc)
+                : toDatabase.Value.ToUniversalTime())
             : toDatabase,
         fromDatabase => fromDatabase.HasValue
             ? DateTime.SpecifyKind(fromDatabase.Value, DateTimeKind.Utc)

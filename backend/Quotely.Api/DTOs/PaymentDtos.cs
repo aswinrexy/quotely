@@ -194,36 +194,5 @@ public record VerifyPaymentResponse
 /// present exactly once — only its hash is stored — so the share material is composed here, in the
 /// same response, rather than requiring a second call that could never see the token again.
 /// </summary>
-public record PublicInvoiceLinkDto(string Url, DateTime CreatedAt, InvoiceShareDto Share);
+public record PublicInvoiceLinkDto(string Url, DateTime CreatedAt, ShareDto Share);
 
-/// <summary>
-/// Ready-made deep links for handing an invoice to a customer (V2.4).
-///
-/// Quotely sends nothing itself: <see cref="WhatsAppUrl"/> opens WhatsApp and
-/// <see cref="MailtoUrl"/> opens the owner's own mail client, both with the message already
-/// written. No WhatsApp Business API, no mail server, no delivery guarantee.
-///
-/// The only identifier any of these carry is the public invoice URL. No token is exposed on its
-/// own, and no internal id — user, customer, invoice, payment or provider — appears anywhere.
-/// </summary>
-public record InvoiceShareDto
-{
-    /// <summary>The public invoice URL, for the plain "copy link" action.</summary>
-    public string Url { get; init; } = string.Empty;
-
-    /// <summary>The composed message, shown so the owner can read it before sending.</summary>
-    public string Message { get; init; } = string.Empty;
-
-    public string EmailSubject { get; init; } = string.Empty;
-
-    /// <summary>Addressed to the customer when a usable number is on file; unaddressed otherwise.</summary>
-    public string WhatsAppUrl { get; init; } = string.Empty;
-
-    /// <summary>Addressed to the customer when an email is on file; unaddressed otherwise.</summary>
-    public string MailtoUrl { get; init; } = string.Empty;
-
-    /// <summary>Digits only, or null when the snapshot holds no usable number. For display.</summary>
-    public string? CustomerPhone { get; init; }
-
-    public string? CustomerEmail { get; init; }
-}

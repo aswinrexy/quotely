@@ -292,13 +292,31 @@ public class ManualPaymentApiTests : IClassFixture<QuotelyApiFactory>
     }
 
     [Fact]
-    public async Task A_future_payment_date_is_refused()
+    public async Task A_genuinely_future_payment_date_is_refused()
     {
         var client = await _factory.CreateSignedInClientAsync();
         var invoice = await CreateInvoiceAsync(client);
 
-        (await RecordAsync(client, invoice.Id, 1000m, paymentDate: Today.AddDays(1)))
+        (await RecordAsync(client, invoice.Id, 1000m, paymentDate: Today.AddDays(2)))
             .StatusCode.Should().Be(HttpStatusCode.BadRequest);
+    }
+
+    /// <summary>
+    /// The owner's "today" is a local date, and east of UTC it runs ahead of the server's. A
+    /// business in Chennai entering a cash payment at 1am is a full calendar day ahead of UTC,
+    /// and refusing that made the app look broken every night between midnight and 05:30. One
+    /// day of tolerance covers every timezone, since none is further ahead than UTC+14.
+    /// </summary>
+    [Fact]
+    public async Task A_payment_dated_tomorrow_in_utc_is_accepted_for_owners_east_of_it()
+    {
+        var client = await _factory.CreateSignedInClientAsync();
+        var invoice = await CreateInvoiceAsync(client);
+
+        var response = await RecordAsync(client, invoice.Id, 1000m, paymentDate: Today.AddDays(1));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Created);
+        (await ReadInvoiceAsync(client, invoice.Id))!.Paid.Should().Be(1000m);
     }
 
     [Theory]
@@ -521,6 +539,31 @@ public class ManualPaymentApiTests : IClassFixture<QuotelyApiFactory>
         reread.Paid.Should().Be(4500m);
         reread.Outstanding.Should().Be(5500m);
         reread.Status.Should().Be("PartiallyPaid");
+    }
+
+
+    [Fact]
+    public async Task A_voided_payment_disappears_from_the_customers_public_invoice_page()
+    {
+        var client = await _factory.CreateSignedInClientAsync();
+        var invoice = await CreateInvoiceAsync(client);
+
+        var standing = await RecordOkAsync(client, invoice.Id, 3000m);
+        var mistake = await RecordOkAsync(client, invoice.Id, 4000m);
+        await VoidAsync(client, invoice.Id, mistake.Id);
+
+        var link = (await (await client.PostAsync($"/api/invoices/{invoice.Id}/public-link", null))
+            .Content.ReadFromJsonAsync<PublicInvoiceLinkDto>())!;
+        var token = link.Url[(link.Url.LastIndexOf('/') + 1)..];
+
+        var page = (await _factory.CreateClient()
+            .GetFromJsonAsync<PublicInvoiceDto>($"/api/public/invoices/{token}"))!;
+
+        // The customer is asked for 7,000 — so the payments listed beneath must add up to 3,000,
+        // not to the 7,000 that includes money the owner has since struck out.
+        page.Paid.Should().Be(3000m);
+        page.Outstanding.Should().Be(7000m);
+        page.Payments.Should().ContainSingle().Which.Amount.Should().Be(standing.Amount);
     }
 
     // ---- history ----------------------------------------------------------

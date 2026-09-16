@@ -42,7 +42,11 @@ public class PublicQuotationService : IPublicQuotationService
     public async Task<PublicQuotationLinkDto> CreateLinkAsync(Guid userId, Guid quotationId, CancellationToken ct = default)
     {
         // Ownership is enforced here, exactly as on every other authenticated quotation query.
-        var quotation = await _db.Quotations.FirstOrDefaultAsync(q => q.Id == quotationId && q.UserId == userId, ct)
+        // The customer comes along because the share message is addressed to them; a quotation
+        // belonging to another user is simply not found, which is what every other query reports.
+        var quotation = await _db.Quotations
+                            .Include(q => q.Customer)
+                            .FirstOrDefaultAsync(q => q.Id == quotationId && q.UserId == userId, ct)
                         ?? throw ApiException.NotFound("Quotation");
 
         var token = PublicTokenGenerator.CreateToken();
@@ -56,7 +60,19 @@ public class PublicQuotationService : IPublicQuotationService
 
         await _db.SaveChangesAsync(ct);
 
-        return new PublicQuotationLinkDto(BuildUrl(token), quotation.PublicLinkCreatedAt.Value);
+        // Every figure in the message is read from the records we just loaded — the stored,
+        // server-calculated total, the quotation number the server allocated, and the owner's own
+        // business name. Nothing the browser sends can influence what the customer is told.
+        var business = await LoadBusinessAsync(userId, ct);
+        var url = BuildUrl(token);
+        var share = QuotationShareBuilder.Build(
+            quotation,
+            quotation.Customer,
+            business?.BusinessName ?? "Quotation",
+            business?.Currency ?? "INR",
+            url);
+
+        return new PublicQuotationLinkDto(url, quotation.PublicLinkCreatedAt.Value, share);
     }
 
     public async Task<PublicQuotationDto> GetAsync(string token, CancellationToken ct = default)
