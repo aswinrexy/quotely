@@ -85,11 +85,50 @@ public class InvoicesController : ControllerBase
     public async Task<ActionResult<PublicInvoiceLinkDto>> CreatePublicLink(Guid id, CancellationToken ct)
         => Ok(await _publicInvoices.CreateLinkAsync(_currentUser.Id, id, ct));
 
+    /// <summary>
+    /// What the business is owed across every issued invoice, plus the few worth chasing first.
+    /// Aggregated by the database — the dashboard does not add invoices up in the browser.
+    /// </summary>
+    [HttpGet("stats")]
+    [ProducesResponseType(typeof(ReceivablesDto), StatusCodes.Status200OK)]
+    public async Task<ActionResult<ReceivablesDto>> Stats(
+        [FromQuery] int needsAttention = 5, CancellationToken ct = default)
+        => Ok(await _invoices.GetReceivablesAsync(_currentUser.Id, needsAttention, ct));
+
     /// <summary>Payment history and the derived financial summary for one of the caller's invoices.</summary>
     [HttpGet("{id:guid}/payments")]
     [ProducesResponseType(typeof(InvoicePaymentsDto), StatusCodes.Status200OK)]
     public async Task<ActionResult<InvoicePaymentsDto>> Payments(Guid id, CancellationToken ct)
         => Ok(await _payments.GetInvoicePaymentsAsync(_currentUser.Id, id, ct));
+
+    /// <summary>
+    /// Records money received outside the gateway — cash, a bank transfer, a UPI transfer, a
+    /// cheque (V2.5). It joins the same ledger a Razorpay capture does; the amount is validated
+    /// against an outstanding balance the server computes, never one the browser supplies.
+    /// </summary>
+    [HttpPost("{id:guid}/payments")]
+    [ProducesResponseType(typeof(PaymentDto), StatusCodes.Status201Created)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
+    public async Task<ActionResult<PaymentDto>> RecordPayment(
+        Guid id, RecordManualPaymentRequest request, CancellationToken ct)
+    {
+        var payment = await _payments.RecordManualPaymentAsync(_currentUser.Id, id, request, ct);
+        return Created($"/api/invoices/{id}/payments", payment);
+    }
+
+    /// <summary>
+    /// Stops a manual payment counting toward the balance while keeping it on the record. Only
+    /// manual payments can be voided: gateway money is the provider's record, and correcting it
+    /// means a refund, which this version does not perform.
+    /// </summary>
+    [HttpPost("{id:guid}/payments/{paymentId:guid}/void")]
+    [ProducesResponseType(typeof(PaymentDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
+    public async Task<ActionResult<PaymentDto>> VoidPayment(Guid id, Guid paymentId, CancellationToken ct)
+        => Ok(await _payments.VoidPaymentAsync(_currentUser.Id, id, paymentId, ct));
 
     /// <summary>Renders the stored snapshot. Nothing is read from the live catalogue.</summary>
     [HttpPost("{id:guid}/pdf")]

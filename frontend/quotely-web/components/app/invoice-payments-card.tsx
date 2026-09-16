@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
 import { ConfirmDialog } from "@/components/ui/dialog";
 import { Pill } from "@/components/ui/badge";
+import { cn } from "@/lib/cn";
 import { Icon } from "@/components/ui/icons";
 import { Mono } from "@/components/ui/table";
 import { Dialog } from "@/components/ui/dialog";
@@ -15,9 +16,11 @@ import type {
   Invoice,
   InvoiceShare,
   InvoicePayments,
+  Payment,
   PaymentStatus,
   PublicInvoiceLink,
 } from "@/types";
+import { MANUAL_PAYMENT_METHOD_LABELS, type ManualPaymentMethod } from "@/types";
 
 const PAYMENT_TONES: Record<PaymentStatus, "neutral" | "blue" | "green" | "amber" | "rose"> = {
   Created: "neutral",
@@ -27,57 +30,158 @@ const PAYMENT_TONES: Record<PaymentStatus, "neutral" | "blue" | "green" | "amber
   Cancelled: "neutral",
 };
 
+/** "bank_transfer" reads as a database value; "Bank transfer" reads as a payment. */
+function methodLabel(method?: string | null) {
+  if (!method) return null;
+  return MANUAL_PAYMENT_METHOD_LABELS[method as ManualPaymentMethod] ?? method.replace(/_/g, " ").toUpperCase();
+}
+
 /**
- * The owner's read-only view of what a customer has paid. Amounts come from the server, which
- * derives them from captured payments — nothing here is entered by hand.
+ * The owner's view of every payment against an invoice, gateway and manual together in one
+ * chronological list. Amounts come from the server, which derives them from the ledger — nothing
+ * here is added up in the browser.
+ *
+ * Void appears only on manual rows the server says are voidable. Gateway money is the provider's
+ * record: correcting it means a refund, which this version does not perform.
  */
-export function PaymentHistoryCard({ payments }: { payments: InvoicePayments | null }) {
+export function PaymentHistoryCard({
+  payments,
+  invoiceId,
+  onChanged,
+}: {
+  payments: InvoicePayments | null;
+  invoiceId: string;
+  onChanged: () => void;
+}) {
+  const toast = useToast();
+  const [voiding, setVoiding] = useState<Payment | null>(null);
+  const [working, setWorking] = useState(false);
+
   if (!payments || payments.payments.length === 0) return null;
 
   const overpaid = payments.summary.overpaidBy > 0;
 
-  return (
-    <Card>
-      <CardHeader title="Payment history" description="Recorded automatically as payments settle." />
+  async function confirmVoid() {
+    if (!voiding) return;
+    setWorking(true);
+    try {
+      await api.post(`/api/invoices/${invoiceId}/payments/${voiding.id}/void`, undefined);
+      toast("Payment voided", "success");
+      setVoiding(null);
+      onChanged();
+    } catch (err) {
+      toast(err instanceof Error ? err.message : "Could not void the payment.", "error");
+    } finally {
+      setWorking(false);
+    }
+  }
 
-      {/* An overpayment needs a person to resolve it, so it is stated rather than left in a log. */}
-      {overpaid && (
-        <div className="border-b border-ash bg-amber-wash px-4 py-3">
-          <p className="flex items-center gap-1.5 text-body font-medium text-amber-ink">
-            <Icon.alert className="h-4 w-4 shrink-0" />
-            Overpaid by {formatMoney(payments.summary.overpaidBy, payments.summary.currency)}
-          </p>
-          <p className="mt-0.5 text-caption text-amber-ink">
-            More was captured than this invoice is for. Refund the difference through your Razorpay
-            dashboard.
-          </p>
-        </div>
-      )}
-      <ul className="divide-y divide-ash">
-        {payments.payments.map((payment) => (
-          <li key={payment.id} className="px-4 py-3">
-            <div className="flex flex-wrap items-baseline justify-between gap-2">
-              <span className="font-medium tabular-nums text-charcoal">
-                {formatMoney(payment.amount, payment.currency)}
-              </span>
-              <Pill tone={PAYMENT_TONES[payment.status] ?? "neutral"}>{payment.status}</Pill>
-            </div>
-            <p className="mt-1 text-caption text-fog">
-              {formatDate(payment.paidAt ?? payment.createdAt)}
-              {payment.method ? ` · ${payment.method.toUpperCase()}` : ""}
+  return (
+    <>
+      <Card>
+        <CardHeader
+          title="Payment history"
+          description="Money received online and by hand, in one place."
+        />
+
+        {/* An overpayment needs a person to resolve it, so it is stated rather than left in a log. */}
+        {overpaid && (
+          <div className="border-b border-ash bg-amber-wash px-4 py-3">
+            <p className="flex items-center gap-1.5 text-body font-medium text-amber-ink">
+              <Icon.alert className="h-4 w-4 shrink-0" />
+              Overpaid by {formatMoney(payments.summary.overpaidBy, payments.summary.currency)}
             </p>
-            {payment.reference && (
-              <p className="mt-0.5 break-all text-caption text-fog">
-                <Mono className="text-caption">{payment.reference}</Mono>
-              </p>
-            )}
-            {payment.failureReason && (
-              <p className="mt-1 text-caption text-rose-ink">{payment.failureReason}</p>
-            )}
-          </li>
-        ))}
-      </ul>
-    </Card>
+            <p className="mt-0.5 text-caption text-amber-ink">
+              More has been recorded than this invoice is for. Void a manual payment if one was
+              entered twice, or refund the difference through your Razorpay dashboard.
+            </p>
+          </div>
+        )}
+
+        <ul className="divide-y divide-ash">
+          {payments.payments.map((payment) => {
+            const label = methodLabel(payment.method);
+            return (
+              <li key={payment.id} className="px-4 py-3">
+                <div className="flex flex-wrap items-baseline justify-between gap-2">
+                  <span
+                    className={cn(
+                      "font-medium tabular-nums",
+                      payment.isVoided ? "text-fog line-through" : "text-charcoal",
+                    )}
+                  >
+                    {formatMoney(payment.amount, payment.currency)}
+                  </span>
+                  <div className="flex items-center gap-1.5">
+                    {payment.isVoided ? (
+                      <Pill tone="neutral">Voided</Pill>
+                    ) : (
+                      <>
+                        <Pill tone={payment.source === "Manual" ? "blue" : "neutral"}>
+                          {payment.source === "Manual" ? "Manual" : payment.provider}
+                        </Pill>
+                        <Pill tone={PAYMENT_TONES[payment.status] ?? "neutral"}>{payment.status}</Pill>
+                      </>
+                    )}
+                  </div>
+                </div>
+
+                <p className="mt-1 text-caption text-fog">
+                  {formatDate(payment.paidAt ?? payment.createdAt)}
+                  {label ? ` · ${label}` : ""}
+                </p>
+
+                {payment.reference && (
+                  <p className="mt-0.5 break-all text-caption text-fog">
+                    <Mono className="text-caption">{payment.reference}</Mono>
+                  </p>
+                )}
+
+                {payment.notes && (
+                  <p className="mt-1 whitespace-pre-line text-caption text-steel">{payment.notes}</p>
+                )}
+
+                {payment.failureReason && (
+                  <p className="mt-1 text-caption text-rose-ink">{payment.failureReason}</p>
+                )}
+
+                {payment.isVoided && payment.voidedAt && (
+                  <p className="mt-1 text-caption text-fog">
+                    Voided {formatDate(payment.voidedAt)} · kept for your records
+                  </p>
+                )}
+
+                {payment.canVoid && (
+                  <button
+                    type="button"
+                    onClick={() => setVoiding(payment)}
+                    className="mt-2 rounded-input text-caption font-medium text-fog transition-colors duration-150 ease-out hover:text-rose-ink"
+                  >
+                    Void
+                  </button>
+                )}
+              </li>
+            );
+          })}
+        </ul>
+      </Card>
+
+      <ConfirmDialog
+        open={voiding !== null}
+        title="Void payment?"
+        description={
+          voiding
+            ? `${formatMoney(voiding.amount, voiding.currency)}${
+                methodLabel(voiding.method) ? ` · ${methodLabel(voiding.method)}` : ""
+              }. This removes the payment from the invoice balance while keeping the record for audit purposes.`
+            : ""
+        }
+        confirmLabel="Void payment"
+        loading={working}
+        onConfirm={confirmVoid}
+        onCancel={() => setVoiding(null)}
+      />
+    </>
   );
 }
 

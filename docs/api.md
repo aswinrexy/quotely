@@ -117,6 +117,25 @@ Only `name` is required. Paged responses look like:
 { "items": [], "page": 1, "pageSize": 20, "totalCount": 0, "totalPages": 0 }
 ```
 
+### `GET /api/customers/{id}/summary`
+
+One customer's financial standing, with their invoices paged server-side (`page`, `pageSize`,
+default 10).
+
+```json
+{
+  "customerId": "…", "customerName": "John Smith",
+  "totalInvoiced": 50000.00, "totalPaid": 20000.00,
+  "totalOutstanding": 30000.00, "totalOverdue": 30000.00,
+  "invoiceCount": 1, "overdueCount": 1, "currency": "INR",
+  "invoices": { "items": [ … ], "page": 1, "pageSize": 10, "totalCount": 1, "totalPages": 1 }
+}
+```
+
+The money totals exclude drafts and cancelled invoices; the `invoices` listing includes them,
+because the owner is looking at their own record of the customer. Another tenant's customer is a
+`404`.
+
 ## Products & services
 
 | Method | Path | Notes |
@@ -289,14 +308,21 @@ invoice returns `404`.
 | ------ | ---- | ------- |
 | `GET` | `/api/invoices` | paged list; `search`, `status`, `page`, `pageSize` |
 | `POST` | `/api/invoices` | raise an invoice directly, without a quotation |
+| `GET` | `/api/invoices/stats` | receivables across every issued invoice |
 | `GET` | `/api/invoices/{id}` | one invoice with items |
 | `PUT` | `/api/invoices/{id}` | update dates, status, notes, terms and (draft only) items |
 | `DELETE` | `/api/invoices/{id}` | delete, unless `Paid` or `PartiallyPaid` |
 | `GET`/`POST` | `/api/invoices/{id}/pdf` | render the invoice PDF |
 
 `search` matches the invoice number, the snapshotted customer name or company, and the source
-quotation number where there is one. `status` is one of `Draft`, `Sent`, `PartiallyPaid`, `Paid`,
-`Overdue`, `Cancelled`.
+quotation number where there is one.
+
+`status` is one of `Draft`, `Sent`, `PartiallyPaid`, `Paid`, `Overdue`, `Cancelled`. All but
+`Overdue` match the stored status. **`Overdue` is derived, not stored** — it selects invoices that
+are issued, not cancelled, past their due date and still owing something. The filter runs in the
+database and pages normally.
+
+Every row carries `paid`, `outstanding` and `isOverdue`, all derived from the payment ledger.
 
 ### `POST /api/invoices`
 
@@ -428,6 +454,61 @@ choose a contact; `mailtoUrl` behaves the same way when there is no email. The o
 of this carries is the public invoice URL — never a token on its own, a JWT, or a user, customer,
 invoice or payment id.
 
+### `GET /api/invoices/stats`
+
+What the business is owed, aggregated by the database. `needsAttention` (default 5, max 20) caps
+the list of invoices to chase.
+
+```json
+{
+  "totalOutstanding": 30000.00, "totalOverdue": 30000.00,
+  "countOutstanding": 1, "countOverdue": 1, "currency": "INR",
+  "needsAttention": [
+    { "id": "…", "invoiceNumber": "INV-000001", "customerName": "John Smith",
+      "dueDate": "2026-09-01", "outstanding": 30000.00, "currency": "INR", "isOverdue": true }
+  ]
+}
+```
+
+Drafts and cancelled invoices are excluded from every figure. `needsAttention` is ordered by due
+date, longest overdue first, and includes not-yet-due unpaid invoices after them.
+
+### `POST /api/invoices/{id}/payments`
+
+Records money received outside the gateway (V2.5) — cash, a bank transfer, a UPI transfer, a
+cheque. Returns `201 Created` with the payment.
+
+```json
+{
+  "amount": 20000.00,
+  "method": "cash",
+  "paymentDate": "2026-09-10",
+  "reference": "Receipt 4471",
+  "notes": "Collected on site"
+}
+```
+
+`method` is one of `cash`, `bank_transfer`, `upi`, `cheque`, `other`; anything else is `400`.
+`paymentDate` defaults to today, may be back-dated, and may not be in the future (`400`).
+`reference` (100 chars) and `notes` (500) are optional.
+
+**The amount is validated against a balance the server computes**, never one the client supplies:
+more than the outstanding balance is `400`, as is zero or negative. A `Draft` or `Cancelled`
+invoice returns `409`. Another tenant's invoice returns `404`.
+
+The payment is recorded as `Captured` with `source: "Manual"` — there is nothing left to confirm —
+and the invoice is recalculated through the same path a Razorpay capture uses.
+
+### `POST /api/invoices/{id}/payments/{paymentId}/void`
+
+Stops a manual payment counting toward the balance, keeping the row as an audit record. Returns
+`200` with the voided payment.
+
+Only `source: "Manual"` payments can be voided; a gateway payment returns `409`, as does one
+already voided. A payment belonging to a different invoice — even one the caller owns — returns
+`404`. Voiding recalculates the invoice, so a `Paid` invoice can return to `PartiallyPaid`, or to
+`Sent` if nothing counts any more.
+
 ### `GET /api/invoices/{id}/payments`
 
 Payment history and the derived financial summary.
@@ -448,7 +529,11 @@ Payment history and the derived financial summary.
 ```
 
 `paid` is summed from captured payments; there is no stored, editable paid column. `overpaidBy` is
-zero except in the anomaly case where the provider captured more than the invoice total. Payment
+zero except in the anomaly case where more has been recorded than the invoice total. Each payment
+carries `source` (`"Gateway"` or `"Manual"`), `isVoided`, `voidedAt` and `canVoid` — `canVoid` is
+true only for a manual payment that still stands, so one action can be rendered without the client
+re-deriving the rule. `reference` is the provider's payment id for gateway money and the owner's
+own reference for a manual payment. Payment
 `status` is our own vocabulary — `Created`, `Pending`, `Captured`, `Failed`, `Cancelled` — not the
 provider's.
 

@@ -16,11 +16,13 @@ public class CustomersController : ControllerBase
 {
     private readonly AppDbContext _db;
     private readonly ICurrentUser _currentUser;
+    private readonly ICustomerSummaryService _summaries;
 
-    public CustomersController(AppDbContext db, ICurrentUser currentUser)
+    public CustomersController(AppDbContext db, ICurrentUser currentUser, ICustomerSummaryService summaries)
     {
         _db = db;
         _currentUser = currentUser;
+        _summaries = summaries;
     }
 
     [HttpGet]
@@ -56,6 +58,17 @@ public class CustomersController : ControllerBase
     [HttpGet("{id:guid}")]
     public async Task<ActionResult<CustomerDto>> Get(Guid id, CancellationToken ct)
         => Ok(Map(await FindAsync(id, tracking: false, ct)));
+
+    /// <summary>
+    /// What this customer has been invoiced, has paid, and still owes — plus their invoices,
+    /// paged in the database rather than filtered in the browser (V2.5).
+    /// </summary>
+    [HttpGet("{id:guid}/summary")]
+    [ProducesResponseType(typeof(CustomerSummaryDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<CustomerSummaryDto>> Summary(
+        Guid id, [FromQuery] int page = 1, [FromQuery] int pageSize = 10, CancellationToken ct = default)
+        => Ok(await _summaries.GetAsync(_currentUser.Id, id, page, pageSize, ct));
 
     [HttpPost]
     public async Task<ActionResult<CustomerDto>> Create(SaveCustomerRequest request, CancellationToken ct)

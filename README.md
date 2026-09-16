@@ -268,6 +268,56 @@ Sharing a draft issues it (`Draft` becomes `Sent`), the same as before. Because 
 token is stored, the URL is shown once: reopening the page later offers **Share again**, which
 mints a new link and immediately retires the old one.
 
+## Recording money you were paid directly
+
+Not every payment arrives through a gateway. An electrician handed ₹20,000 in cash still needs the
+invoice to say so, and until V2.5 Quotely could not record that — the invoice stayed wrongly
+outstanding.
+
+An issued invoice's details page has **Record payment**: amount (prefilled with what is
+outstanding, and editable down for a part payment), method — cash, bank transfer, UPI, cheque or
+other — the date the money arrived (back-datable, never in the future), an optional reference for
+your bank statement, and an optional private note.
+
+**There is one payment ledger.** A cash payment and a Razorpay capture are the same kind of record,
+counted by the same calculation. An invoice can be settled by any mix of the two:
+
+| Invoice ₹10,000 | | |
+| --- | --- | --- |
+| Cash | ₹3,000 | manual |
+| Razorpay | ₹4,000 | gateway |
+| Bank transfer | ₹3,000 | manual |
+| **Paid** | **₹10,000** | status becomes **Paid** |
+
+Opening online checkout after a part payment asks the gateway only for what is still owed.
+
+### Voiding
+
+Mistyped an amount? **Void** appears on manual payments in the payment history. Voiding stops the
+payment counting toward the balance but **never deletes it** — the row stays, struck through and
+marked voided, and the invoice returns to PartiallyPaid or to owing the full amount.
+
+Gateway payments cannot be voided. That money is Razorpay's record as well as yours, and correcting
+it means a refund, which Quotely does not perform.
+
+## Overdue and receivables
+
+An invoice is **overdue** when it has been issued, is not cancelled, is past its due date, and
+still has a balance. This is worked out fresh on every read rather than stored, so an invoice
+becomes overdue simply because the date rolled over — there is no scheduler, nothing to run
+nightly, and no stored status that can drift out of step with the calendar. Paying it in full stops
+it being overdue immediately.
+
+The **Overdue** filter on the invoices list is a real database query, so it pages properly.
+
+The dashboard leads with **Outstanding** and **Overdue**, both summed by the server across every
+issued invoice, and a compact **Needs attention** list of unpaid invoices with the longest overdue
+first. Drafts and cancelled invoices are excluded from every figure.
+
+A customer's page shows what they have been invoiced, paid, and still owe, with their invoices
+listed beneath — paged by the server, so a customer with more than a page of them is counted in
+full.
+
 ## Online payments (Razorpay)
 
 An issued invoice can be shared as a payment link. The customer opens `/i/{token}`, sees the

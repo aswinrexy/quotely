@@ -23,12 +23,15 @@ import {
 } from "@/components/ui/table";
 import { PageHeader } from "@/components/app/page-header";
 import { Icon } from "@/components/ui/icons";
-import type { Customer, PagedResult, QuotationListItem } from "@/types";
+import { InvoiceStatusBadge } from "@/components/ui/badge";
+import { StatCard } from "@/components/ui/stat-card";
+import type { Customer, CustomerSummary, PagedResult, QuotationListItem } from "@/types";
 
 export default function CustomerDetailPage() {
   const { id } = useParams<{ id: string }>();
   const [customer, setCustomer] = useState<Customer | null>(null);
   const [quotations, setQuotations] = useState<QuotationListItem[]>([]);
+  const [summary, setSummary] = useState<CustomerSummary | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -36,12 +39,16 @@ export default function CustomerDetailPage() {
     setLoading(true);
     setError(null);
     try {
-      const [customerResult, quotationResult] = await Promise.all([
+      const [customerResult, quotationResult, summaryResult] = await Promise.all([
         api.get<Customer>(`/api/customers/${id}`),
-        api.get<PagedResult<QuotationListItem>>(`/api/quotations?pageSize=100`),
+        // Filtered by the server. This used to request page one of every quotation and filter
+        // here, which lost anything belonging to a customer past that first page.
+        api.get<PagedResult<QuotationListItem>>(`/api/quotations?customerId=${id}&pageSize=20`),
+        api.get<CustomerSummary>(`/api/customers/${id}/summary?pageSize=10`),
       ]);
       setCustomer(customerResult);
-      setQuotations(quotationResult.items.filter((q) => q.customerId === id));
+      setQuotations(quotationResult.items);
+      setSummary(summaryResult);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not load the customer.");
     } finally {
@@ -98,11 +105,41 @@ export default function CustomerDetailPage() {
               <Button variant="secondary">Edit</Button>
             </Link>
             <Link href={`/quotations/new?customerId=${customer.id}`}>
-              <Button>New quotation</Button>
+              <Button variant="secondary">New quotation</Button>
+            </Link>
+            <Link href={`/invoices/new?customerId=${customer.id}`}>
+              <Button>New invoice</Button>
             </Link>
           </>
         }
       />
+
+      {/* What this customer owes, before anything else about them. */}
+      {summary && summary.invoiceCount > 0 && (
+        <div className="mb-4 grid grid-cols-2 gap-3 lg:grid-cols-4">
+          <StatCard
+            label="Outstanding"
+            value={formatMoney(summary.totalOutstanding, summary.currency)}
+            context={summary.totalOutstanding > 0 ? "Owed by this customer" : "Nothing owed"}
+            accent={summary.totalOutstanding > 0}
+          />
+          <StatCard
+            label="Overdue"
+            value={formatMoney(summary.totalOverdue, summary.currency)}
+            context={summary.overdueCount > 0 ? `${summary.overdueCount} past due` : "Nothing past due"}
+          />
+          <StatCard
+            label="Invoiced"
+            value={formatMoney(summary.totalInvoiced, summary.currency)}
+            context={`${summary.invoiceCount} ${summary.invoiceCount === 1 ? "invoice" : "invoices"}`}
+          />
+          <StatCard
+            label="Paid"
+            value={formatMoney(summary.totalPaid, summary.currency)}
+            context="Received to date"
+          />
+        </div>
+      )}
 
       <div className="grid gap-4 lg:grid-cols-3">
         <Card className="lg:col-span-1">
@@ -125,7 +162,133 @@ export default function CustomerDetailPage() {
           </CardBody>
         </Card>
 
-        <Card className="lg:col-span-2">
+        <div className="space-y-4 lg:col-span-2">
+        <Card>
+          <CardHeader
+            title="Invoices"
+            description="Invoices raised for this customer."
+            action={
+              <Link
+                href="/invoices"
+                className="inline-flex items-center gap-1 text-body font-medium text-electric hover:underline"
+              >
+                All invoices
+                <Icon.chevronRight className="h-3.5 w-3.5" />
+              </Link>
+            }
+          />
+          {!summary || summary.invoices.items.length === 0 ? (
+            <EmptyState
+              title="No invoices yet"
+              description="Bill this customer directly, or convert an accepted quotation."
+              action={
+                <Link href={`/invoices/new?customerId=${customer.id}`}>
+                  <Button>New invoice</Button>
+                </Link>
+              }
+            />
+          ) : (
+            <>
+              <TableWrap>
+                <Table>
+                  <thead>
+                    <tr>
+                      <Th>Invoice</Th>
+                      <Th>Due</Th>
+                      <Th>Status</Th>
+                      <Th align="right">Total</Th>
+                      <Th align="right">Outstanding</Th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {summary.invoices.items.map((invoice) => (
+                      <Tr key={invoice.id}>
+                        <Td>
+                          <Link
+                            href={`/invoices/${invoice.id}`}
+                            className="font-medium text-electric hover:underline"
+                          >
+                            <Mono>{invoice.invoiceNumber}</Mono>
+                          </Link>
+                        </Td>
+                        <Td>
+                          {formatDate(invoice.dueDate)}
+                          {invoice.isOverdue && (
+                            <span className="ml-1.5 text-caption font-medium text-rose-ink">
+                              Past due
+                            </span>
+                          )}
+                        </Td>
+                        <Td>
+                          <InvoiceStatusBadge status={invoice.status} />
+                        </Td>
+                        <Td align="right">
+                          <Amount>{formatMoney(invoice.grandTotal, invoice.currency)}</Amount>
+                        </Td>
+                        <Td align="right">
+                          {invoice.outstanding > 0 ? (
+                            <Amount>{formatMoney(invoice.outstanding, invoice.currency)}</Amount>
+                          ) : (
+                            <span className="text-caption text-fog">Paid</span>
+                          )}
+                        </Td>
+                      </Tr>
+                    ))}
+                  </tbody>
+                </Table>
+              </TableWrap>
+
+              <MobileList>
+                {summary.invoices.items.map((invoice) => (
+                  <MobileRow key={invoice.id}>
+                    <div className="flex items-start justify-between gap-3">
+                      <Link
+                        href={`/invoices/${invoice.id}`}
+                        className="font-medium text-electric hover:underline"
+                      >
+                        <Mono>{invoice.invoiceNumber}</Mono>
+                      </Link>
+                      <InvoiceStatusBadge status={invoice.status} />
+                    </div>
+                    <MobileFacts
+                      items={[
+                        {
+                          label: "Total",
+                          value: <Amount>{formatMoney(invoice.grandTotal, invoice.currency)}</Amount>,
+                        },
+                        {
+                          label: "Outstanding",
+                          value:
+                            invoice.outstanding > 0 ? (
+                              <Amount>{formatMoney(invoice.outstanding, invoice.currency)}</Amount>
+                            ) : (
+                              "Paid"
+                            ),
+                        },
+                        {
+                          label: "Due",
+                          value: invoice.isOverdue ? (
+                            <span className="text-rose-ink">{formatDate(invoice.dueDate)}</span>
+                          ) : (
+                            formatDate(invoice.dueDate)
+                          ),
+                        },
+                      ]}
+                    />
+                  </MobileRow>
+                ))}
+              </MobileList>
+
+              {summary.invoices.totalCount > summary.invoices.items.length && (
+                <div className="border-t border-ash px-4 py-2.5 text-caption text-fog">
+                  Showing {summary.invoices.items.length} of {summary.invoices.totalCount} invoices.
+                </div>
+              )}
+            </>
+          )}
+        </Card>
+
+        <Card>
           <CardHeader title="Quotations" description="Quotations raised for this customer." />
           {quotations.length === 0 ? (
             <EmptyState
@@ -200,6 +363,7 @@ export default function CustomerDetailPage() {
             </MobileList>
           )}
         </Card>
+        </div>
       </div>
     </>
   );

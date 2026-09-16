@@ -178,9 +178,15 @@ public class AppDbContext : IdentityDbContext<AppUser, IdentityRole<Guid>, Guid>
             e.Property(x => x.Amount).HasPrecision(18, 2);
             e.Property(x => x.Currency).HasMaxLength(3).IsRequired();
             e.Property(x => x.Provider).HasMaxLength(30).IsRequired();
-            e.Property(x => x.ProviderOrderId).HasMaxLength(80).IsRequired();
+            // Nullable since V2.5: a manual payment has no provider order behind it.
+            e.Property(x => x.ProviderOrderId).HasMaxLength(80);
             e.Property(x => x.ProviderPaymentId).HasMaxLength(80);
             e.Property(x => x.Method).HasMaxLength(40);
+            e.Property(x => x.Reference).HasMaxLength(100);
+            e.Property(x => x.Notes).HasMaxLength(500);
+            // Reading the ledger always asks for captured, non-voided rows on one invoice, so the
+            // existing (InvoiceId, Status) index is extended to cover the void check too.
+            e.HasIndex(x => new { x.InvoiceId, x.Status, x.VoidedAt });
             e.Property(x => x.CustomerName).HasMaxLength(200);
             e.Property(x => x.CustomerEmail).HasMaxLength(256);
             e.Property(x => x.FailureReason).HasMaxLength(500);

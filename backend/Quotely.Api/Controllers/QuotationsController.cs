@@ -38,8 +38,9 @@ public class QuotationsController : ControllerBase
     [HttpGet]
     public async Task<ActionResult<PagedResult<QuotationListItemDto>>> List(
         [FromQuery] string? search, [FromQuery] string? status,
-        [FromQuery] int page = 1, [FromQuery] int pageSize = 20, CancellationToken ct = default)
-        => Ok(await _quotations.ListAsync(_currentUser.Id, search, status, page, pageSize, ct));
+        [FromQuery] int page = 1, [FromQuery] int pageSize = 20,
+        [FromQuery] Guid? customerId = null, CancellationToken ct = default)
+        => Ok(await _quotations.ListAsync(_currentUser.Id, search, status, page, pageSize, customerId, ct));
 
     [HttpGet("stats")]
     public async Task<ActionResult<DashboardStatsDto>> Stats(CancellationToken ct)
