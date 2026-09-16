@@ -37,11 +37,8 @@ to justify it; until then the platform domains are real, HTTPS-terminated URLs t
 | Razorpay webhook | Endpoint live, **not yet registered** | https://quotely-api-yiul.onrender.com/api/webhooks/razorpay |
 | Cloudflare Pages | **Live** | https://quotely-4j2.pages.dev |
 
-The API currently deploys from **`feature/v2.6-quotation-sharing`**, not `main`: `main` is still at
-V2.4 and has neither V2.5 nor V2.6. Repoint it to `main` once V2.6 has been released there.
-
-Both the API and the web app deploy from `feature/v2.6-quotation-sharing`. Repoint each to `main`
-once V2.6 has been released there.
+Both the API and the web app deploy from **`feature/v2.6-quotation-sharing`**, not `main`: `main`
+is still at V2.4 and has neither V2.5 nor V2.6. Repoint both once V2.6 has been released there.
 
 ---
 
