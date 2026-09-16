@@ -273,13 +273,34 @@ Content-Disposition: attachment; filename=QT-000001-John-Smith.pdf
 Creates the customer-facing share link for one of the caller's own quotations.
 
 ```json
-{ "url": "https://quotely.app/q/7f9c2a…", "createdAt": "2026-09-11T09:14:00Z" }
+{
+  "url": "https://quotely.app/q/7f9c2a…",
+  "createdAt": "2026-09-11T09:14:00Z",
+  "share": {
+    "url": "https://quotely.app/q/7f9c2a…",
+    "message": "Hi John,\n\nPlease find quotation QT-000001 from ABC Services.\n\nTotal: ₹25,000.00\nValid until: 30 Sep 2026\n\nView quotation:\nhttps://quotely.app/q/7f9c2a…\n\nThank you.",
+    "emailSubject": "Quotation QT-000001 from ABC Services",
+    "whatsAppUrl": "https://wa.me/919123456780?text=…",
+    "mailtoUrl": "mailto:john%40example.com?subject=…&body=…",
+    "customerPhone": "919123456780",
+    "customerEmail": "john@example.com"
+  }
+}
 ```
 
 Only a SHA-256 hash of the token is stored, so **this response is the one and only time the URL
 exists**. Calling the endpoint again mints a new token and the previously shared URL stops working
 — which is also how a link is revoked. A `Draft` quotation becomes `Sent`; any other status is left
 as it is. Another user's quotation returns `404`.
+
+`share` (V2.6) is the same shape the invoice endpoint returns, composed by the same
+`ShareComposer`: the quotation number, the business name and the total are all read from the
+stored records, never from the request, which carries no body at all. **Quotely sends nothing** —
+`whatsAppUrl` is a `wa.me` deep link and `mailtoUrl` opens the owner's own mail client with a
+draft. `customerPhone` is null when the customer record holds no usable number, and `whatsAppUrl`
+then carries the message without a recipient; `mailtoUrl` behaves the same way with no email. The
+only identifier any of it carries is the public quotation URL. A quotation is not a bill, so
+nothing in the message mentions or invites payment.
 
 The owner's quotation DTO carries `hasPublicLink` and `publicLinkCreatedAt` so the UI can show that
 a link is active, plus `respondedAt`, `respondedByName`, `respondedByEmail` and `responseComment`

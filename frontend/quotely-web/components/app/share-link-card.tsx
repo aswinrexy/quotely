@@ -1,22 +1,27 @@
 "use client";
 
 import { useState } from "react";
-import { api } from "@/lib/api";
+import { api, saveBlob } from "@/lib/api";
 import { formatDate } from "@/lib/format";
 import { useToast } from "@/components/ui/toast";
 import { Button } from "@/components/ui/button";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
 import { Icon } from "@/components/ui/icons";
 import { ConfirmDialog } from "@/components/ui/dialog";
-import type { PublicQuotationLink, Quotation } from "@/types";
+import { ShareDialog } from "@/components/app/share-dialog";
+import type { DocumentShare, PublicQuotationLink, Quotation } from "@/types";
 
 /**
- * Share link panel on the quotation details page.
+ * Share panel on the quotation details page.
  *
- * The API stores only a hash of the share token, so a link can be shown exactly once — at the
- * moment it is created. That is why this panel keeps the URL in component state after generating
- * it, and why asking for a link again is presented as "replace", with a warning: the previous
- * URL stops working immediately.
+ * Only a hash of the share token is stored, so the URL can be shown exactly once — at the moment
+ * it is created. That is why the share material lives in component state here, and why asking
+ * again is presented as "replace": the previous link stops working immediately.
+ *
+ * The WhatsApp and email actions are deep links. Quotely sends nothing itself — WhatsApp opens
+ * with the message written, and the mail action opens the owner's own mail client with a draft.
+ * The message text, the quotation total and both URLs are composed by the server, which is where
+ * the authoritative figures live; the browser only opens what it was handed.
  */
 export function ShareLinkCard({
   quotation,
@@ -26,8 +31,10 @@ export function ShareLinkCard({
   onChanged: () => void;
 }) {
   const toast = useToast();
-  const [url, setUrl] = useState<string | null>(null);
+  const [share, setShare] = useState<DocumentShare | null>(null);
+  const [open, setOpen] = useState(false);
   const [generating, setGenerating] = useState(false);
+  const [downloading, setDownloading] = useState(false);
   const [confirmReplace, setConfirmReplace] = useState(false);
 
   const hasExistingLink = quotation.hasPublicLink;
@@ -35,10 +42,13 @@ export function ShareLinkCard({
   async function generate() {
     setGenerating(true);
     try {
-      const link = await api.post<PublicQuotationLink>(`/api/quotations/${quotation.id}/public-link`, undefined);
-      setUrl(link.url);
+      const link = await api.post<PublicQuotationLink>(
+        `/api/quotations/${quotation.id}/public-link`,
+        undefined,
+      );
+      setShare(link.share);
       setConfirmReplace(false);
-      toast(hasExistingLink ? "New share link created." : "Share link created.", "success");
+      setOpen(true);
       onChanged();
     } catch (err) {
       toast(err instanceof Error ? err.message : "Could not create the share link.", "error");
@@ -47,14 +57,22 @@ export function ShareLinkCard({
     }
   }
 
-  async function copy() {
-    if (!url) return;
+  /** Reopens the panel on material already in memory, rather than silently minting a new link. */
+  function openExisting() {
+    if (share) setOpen(true);
+    else if (hasExistingLink) setConfirmReplace(true);
+    else void generate();
+  }
+
+  async function downloadPdf() {
+    setDownloading(true);
     try {
-      await navigator.clipboard.writeText(url);
-      toast("Link copied", "success");
-    } catch {
-      // Clipboard access can be blocked (insecure origin, permissions); the URL stays selectable.
-      toast("Copy failed — select the link and copy it manually.", "error");
+      const { blob, fileName } = await api.downloadPdf(quotation.id);
+      saveBlob(blob, fileName);
+    } catch (err) {
+      toast(err instanceof Error ? err.message : "Could not generate the PDF.", "error");
+    } finally {
+      setDownloading(false);
     }
   }
 
@@ -96,26 +114,16 @@ export function ShareLinkCard({
             </dl>
           )}
 
-          {url ? (
+          {share ? (
             <>
-              <div className="rounded-input border border-ash bg-paper p-2.5">
-                <p className="break-all font-mono text-caption text-charcoal">{url}</p>
+              <div className="flex items-center gap-2 text-body text-charcoal">
+                <Icon.check className="h-4 w-4 shrink-0 text-electric" />
+                <span>Link ready to send</span>
               </div>
-              <p className="text-caption text-fog">
-                Copy it now — this link is shown once and cannot be displayed again.
-              </p>
-              <div className="flex flex-wrap gap-2">
-                <Button size="sm" onClick={copy}>
-                  <Icon.copy className="h-3.5 w-3.5" />
-                  Copy link
-                </Button>
-                <a href={url} target="_blank" rel="noopener noreferrer">
-                  <Button variant="secondary" size="sm">
-                    <Icon.external className="h-3.5 w-3.5" />
-                    Open
-                  </Button>
-                </a>
-              </div>
+              <Button size="sm" onClick={() => setOpen(true)}>
+                <Icon.link className="h-3.5 w-3.5" />
+                Share quotation
+              </Button>
             </>
           ) : hasExistingLink ? (
             <>
@@ -129,16 +137,12 @@ export function ShareLinkCard({
                 </span>
               </div>
               <p className="text-caption text-fog">
-                Only a hash of the link is stored, so the URL cannot be shown again. Creating a new
-                one immediately stops the old link from working.
+                Only a hash of the link is stored, so the URL cannot be shown again. Sharing again
+                issues a new link and immediately stops the old one from working.
               </p>
-              <Button
-                variant="secondary"
-                size="sm"
-                onClick={() => setConfirmReplace(true)}
-                loading={generating}
-              >
-                Replace link
+              <Button variant="secondary" size="sm" onClick={openExisting} loading={generating}>
+                <Icon.link className="h-3.5 w-3.5" />
+                Share again
               </Button>
             </>
           ) : (
@@ -149,12 +153,30 @@ export function ShareLinkCard({
               </p>
               <Button size="sm" onClick={generate} loading={generating}>
                 <Icon.link className="h-3.5 w-3.5" />
-                Generate share link
+                Share quotation
               </Button>
             </>
           )}
         </CardBody>
       </Card>
+
+      <ShareDialog
+        open={open && share !== null}
+        share={share}
+        title="Share quotation"
+        onClose={() => setOpen(false)}
+        extraAction={
+          <Button
+            variant="secondary"
+            onClick={downloadPdf}
+            loading={downloading}
+            className="w-full justify-start"
+          >
+            <Icon.download className="h-4 w-4" />
+            Download PDF
+          </Button>
+        }
+      />
 
       <ConfirmDialog
         open={confirmReplace}

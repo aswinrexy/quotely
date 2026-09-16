@@ -523,6 +523,31 @@ public class ManualPaymentApiTests : IClassFixture<QuotelyApiFactory>
         reread.Status.Should().Be("PartiallyPaid");
     }
 
+
+    [Fact]
+    public async Task A_voided_payment_disappears_from_the_customers_public_invoice_page()
+    {
+        var client = await _factory.CreateSignedInClientAsync();
+        var invoice = await CreateInvoiceAsync(client);
+
+        var standing = await RecordOkAsync(client, invoice.Id, 3000m);
+        var mistake = await RecordOkAsync(client, invoice.Id, 4000m);
+        await VoidAsync(client, invoice.Id, mistake.Id);
+
+        var link = (await (await client.PostAsync($"/api/invoices/{invoice.Id}/public-link", null))
+            .Content.ReadFromJsonAsync<PublicInvoiceLinkDto>())!;
+        var token = link.Url[(link.Url.LastIndexOf('/') + 1)..];
+
+        var page = (await _factory.CreateClient()
+            .GetFromJsonAsync<PublicInvoiceDto>($"/api/public/invoices/{token}"))!;
+
+        // The customer is asked for 7,000 — so the payments listed beneath must add up to 3,000,
+        // not to the 7,000 that includes money the owner has since struck out.
+        page.Paid.Should().Be(3000m);
+        page.Outstanding.Should().Be(7000m);
+        page.Payments.Should().ContainSingle().Which.Amount.Should().Be(standing.Amount);
+    }
+
     // ---- history ----------------------------------------------------------
 
     [Fact]

@@ -617,16 +617,12 @@ public class PaymentService : IPaymentService
     // ---- helpers --------------------------------------------------------
 
     /// <summary>
-    /// The paid amount, always summed from the rows that count — never read from a column. This
-    /// is the in-service form of the rule <see cref="InvoiceLedger.WithBalance"/> expresses for
-    /// bulk queries: captured, and not voided.
+    /// The paid amount, always summed from the rows that count — never read from a column, and
+    /// never defined twice. <see cref="InvoiceLedger.PaidTotalAsync"/> is the single definition:
+    /// captured, and not voided.
     /// </summary>
-    private async Task<decimal> CapturedTotalAsync(Guid invoiceId, CancellationToken ct) =>
-        await _db.Payments.AsNoTracking()
-            .Where(p => p.InvoiceId == invoiceId
-                        && p.Status == PaymentStatus.Captured
-                        && p.VoidedAt == null)
-            .SumAsync(p => (decimal?)p.Amount, ct) ?? 0m;
+    private Task<decimal> CapturedTotalAsync(Guid invoiceId, CancellationToken ct) =>
+        InvoiceLedger.PaidTotalAsync(_db, invoiceId, ct);
 
     private Task<bool> HasPendingAsync(Guid invoiceId, CancellationToken ct) =>
         _db.Payments.AsNoTracking()

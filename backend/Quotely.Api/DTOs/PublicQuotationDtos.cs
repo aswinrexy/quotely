@@ -87,5 +87,9 @@ public record PublicResponseRequest
     public string? Comment { get; init; }
 }
 
-/// <summary>Returned once, when the owner creates the link. The raw token is never persisted.</summary>
-public record PublicQuotationLinkDto(string Url, DateTime CreatedAt);
+/// <summary>
+/// Returned once, when the owner creates the link. The raw token is never persisted, so this
+/// response is the only moment the URL exists — which is why the ready-to-send share material is
+/// composed into it here rather than left to a second call that could never see the token again.
+/// </summary>
+public record PublicQuotationLinkDto(string Url, DateTime CreatedAt, ShareDto Share);

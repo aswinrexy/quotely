@@ -160,6 +160,8 @@ export interface SaveQuotationRequest {
 export interface PublicQuotationLink {
   url: string;
   createdAt: string;
+  /** Ready-made share material, composed server-side while the URL still exists. */
+  share: DocumentShare;
 }
 
 export interface PublicQuotationItem {
@@ -439,14 +441,15 @@ export interface PublicInvoiceLink {
   url: string;
   createdAt: string;
   /** Ready-made share material, composed server-side while the URL still exists. */
-  share: InvoiceShare;
+  share: DocumentShare;
 }
 
 /**
- * Deep links for handing an invoice to a customer (V2.4). Quotely sends nothing: these open
- * WhatsApp and the owner's own mail client with the message already written.
+ * Deep links for handing a document to a customer — an invoice (V2.4) or a quotation (V2.6).
+ * Quotely sends nothing: these open WhatsApp and the owner's own mail client with the message
+ * already written, and every figure inside was composed by the server.
  */
-export interface InvoiceShare {
+export interface DocumentShare {
   url: string;
   message: string;
   emailSubject: string;
