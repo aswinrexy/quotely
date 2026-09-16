@@ -55,13 +55,13 @@ All values below are **placeholders**. Real values are never written down in thi
 | --- | --- | --- | --- | --- |
 | `ASPNETCORE_ENVIRONMENT` | `Development` | `Test` | `UAT` | `Production` |
 | Config file (committed, no secrets) | `appsettings.Development.json` | `appsettings.Test.json` | `appsettings.UAT.json` | `appsettings.Production.json` |
-| Database engine | SQLite file | SQL Server | SQL Server | SQL Server |
-| Database instance | `quotely.dev.db` (local) | dedicated TEST database | dedicated UAT database | dedicated PROD database |
+| Database engine | SQLite file | PostgreSQL | PostgreSQL | PostgreSQL |
+| Database instance | `quotely.dev.db` (local) | its own Supabase project | its own Supabase project | its own Supabase project |
 | Migrations applied | automatically on start | automatically on start | deliberate deploy step | deliberate deploy step |
 | Demo seed data | yes | no | no | **never** |
-| Razorpay mode | **Test** | **Test** | **Test** | **Live** |
-| Razorpay key ID | test key | test key | test key | live key |
-| Razorpay key secret | test secret | test secret | test secret | live secret |
+| Razorpay mode | **Test** | **Test** | **Test** | **Test** until Live is a deliberate step |
+| Razorpay key ID | test key | test key | test key | test key for now |
+| Razorpay key secret | test secret | test secret | test secret | test secret for now |
 | Razorpay webhook secret | its own | its own | its own | its own |
 | JWT signing key | dev fallback (auto) | its own, ≥32 chars | its own, ≥32 chars | its own, ≥32 chars |
 | API base URL (frontend) | `http://localhost:5199` | `https://<test-api-host>` | `https://<uat-api-host>` | `https://<prod-api-host>` |
@@ -163,20 +163,35 @@ Core model on start-up (`EnsureCreated`), so no Docker or SQL Server install is 
 the app. Delete `quotely.dev.db` to start fresh. A local SQL Server is available via
 `docker compose up -d` if you want to rehearse against the real engine.
 
-**TEST / UAT / PROD — SQL Server.** `Database:Provider` is `SqlServer` and the schema comes from EF
-Core migrations.
+**TEST / UAT / PROD — PostgreSQL.** `Database:Provider` is `Postgres` and the schema comes from EF
+Core migrations. This is the free-tier hosting strategy: Supabase gives a free PostgreSQL and
+nothing gives a free SQL Server worth having. See [`hosting.md`](hosting.md).
 
-### Are the migrations SQL Server compatible?
+**SQL Server is still supported.** Its migrations are intact and `Database:Provider=SqlServer`
+still selects it — the move to PostgreSQL added a provider, it did not replace one.
 
-**Yes.** The five migrations in `backend/Quotely.Api/Migrations/` are authored for SQL Server and
-use its types throughout — `uniqueidentifier`, `nvarchar`, `datetime2`, `bit` — along with filtered
-unique indexes such as `filter: "[QuotationId] IS NOT NULL"`, which SQL Server needs so that many
-directly raised invoices can each hold `NULL`.
+### Three providers, two migration histories
 
-No migration work is outstanding. SQLite never runs a migration; it is built from the model, which
-is why the two providers can coexist without a second set of migration files.
+The same EF model produces different DDL on each engine, and one `__EFMigrationsHistory` cannot
+describe both, so each relational provider keeps its own migration assembly. SQLite never runs a
+migration at all; it is built straight from the model, which is why three providers need only two
+sets of migration files.
 
-| Migration | Adds |
+| Provider | Value | Schema from |
+| --- | --- | --- |
+| SQLite | `Sqlite` | the model (`EnsureCreated`) — DEV only |
+| SQL Server | `SqlServer` | `backend/Quotely.Api/Migrations/` |
+| PostgreSQL | `Postgres` | `backend/Quotely.Migrations.PostgreSql/Migrations/` |
+
+A model change needs a migration added to **both** relational sets:
+
+```bash
+cd backend
+dotnet ef migrations add <Name> --project Quotely.Api --startup-project Quotely.Api
+dotnet ef migrations add <Name> --project Quotely.Migrations.PostgreSql --startup-project Quotely.Migrations.PostgreSql
+```
+
+| SQL Server migration | Adds |
 | --- | --- |
 | `InitialCreate` | identity, business profile, customers, products, quotations |
 | `AddPublicQuotationLinks` | V2.1 share tokens |
@@ -184,6 +199,12 @@ is why the two providers can coexist without a second set of migration files.
 | `AddPayments` | V2.3 payments, webhook events, invoice payment links |
 | `AddPaymentReservations` | V2.3 hardening — the live-attempt reservation slot |
 | `AddDirectInvoices` | V2.4 — nullable `QuotationId` + filtered unique index |
+| `AddManualPayments` | V2.5 — payment source, reference, notes, voiding |
+
+The PostgreSQL set is a single `InitialPostgreSql` migration describing the same model as all of
+the above, because PostgreSQL support began after them. `PostgreSqlCompatibilityTests` asserts that
+the two engines give the same guarantees — exact decimal money, real dates, UTC instants, and
+uniqueness that applies only where a value exists.
 
 ### Applying migrations
 
@@ -195,8 +216,11 @@ UAT and PROD do **not**. A schema change there is a deliberate, reviewed step:
 ```bash
 # 1. Back up the database first. Always. A migration can be one-way.
 # 2. Generate a SQL script and read it before anything touches the server:
-cd backend/Quotely.Api
-dotnet ef migrations script --idempotent --output migration.sql
+cd backend
+dotnet ef migrations script --idempotent \
+  --project Quotely.Migrations.PostgreSql --startup-project Quotely.Migrations.PostgreSql \
+  --output migration.sql
+# (for a SQL Server environment, use --project Quotely.Api --startup-project Quotely.Api)
 
 # 3. Review migration.sql, then apply it through your normal database tooling.
 ```
@@ -240,7 +264,8 @@ A fix that cannot wait branches from `main`, merges back into `main`, and is the
 ## Setting up a new environment
 
 1. **Create its database.** Dedicated, never shared with another environment.
-2. **Create its Razorpay credentials.** Test Mode for TEST and UAT; Live Mode for PROD only.
+2. **Create its Razorpay credentials.** Test Mode everywhere for now — PROD included, until going
+   Live is taken as its own deliberate step.
 3. **Generate a fresh JWT key** — `openssl rand -base64 48`. Never reuse another environment's.
 4. **Set the environment variables** listed above in the hosting platform's secret store.
 5. **Set `ASPNETCORE_ENVIRONMENT`** to `Test`, `UAT` or `Production`.
@@ -270,3 +295,4 @@ Treat it as compromised the moment it is pushed — assume it has been scraped.
 - [`README.md`](../README.md) — running Quotely locally
 - [`docs/api.md`](api.md) — API reference
 - [`docs/architecture.md`](architecture.md) — how the system fits together
+- [`docs/hosting.md`](hosting.md) — the free-tier deployment, its limits, and the smoke test

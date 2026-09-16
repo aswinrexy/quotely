@@ -1,0 +1,62 @@
+# Render blueprint for the Quotely API — free tier, zero monthly cost.
+#
+# What this file is: the shape of the service. What it deliberately is NOT: a place for secrets.
+# Every sensitive value is declared with `sync: false`, which tells Render to ask for it in the
+# dashboard instead of reading it from this repository. Nothing here can be committed by accident
+# because there is nothing here to commit.
+#
+# Read docs/hosting.md before deploying — the free tier sleeps after inactivity, and the database
+# has to exist before the first request arrives.
+
+services:
+  - type: web
+    name: quotely-api
+    runtime: docker
+    plan: free
+    region: singapore          # closest free region to the Supabase project in ap-south-1
+    branch: main               # PROD follows main; TEST is a separate service on develop
+    dockerfilePath: ./backend/Dockerfile
+    dockerContext: ./backend
+    healthCheckPath: /health
+    autoDeploy: true
+
+    envVars:
+      - key: ASPNETCORE_ENVIRONMENT
+        value: Production
+
+      # ---- database ----
+      # Supabase's POOLED connection string (port 6543). Render's free tier restarts the container
+      # on every deploy and after each sleep, and a pooler survives that far better than a direct
+      # connection to a free Postgres instance. Must include SSL Mode=Require.
+      - key: ConnectionStrings__DefaultConnection
+        sync: false
+
+      # ---- authentication ----
+      # 32+ characters of randomness. Changing it signs every user out, which is the intended
+      # behaviour if it is ever believed to have leaked.
+      - key: JWT__KEY
+        sync: false
+      - key: JWT__ISSUER
+        value: Quotely
+      - key: JWT__AUDIENCE
+        value: QuotelyWeb
+
+      # ---- payments ----
+      # Razorpay TEST mode for the first public deployment. Going Live is a separate, deliberate
+      # step: replace these three values and nothing else.
+      - key: Razorpay__KeyId
+        sync: false
+      - key: Razorpay__KeySecret
+        sync: false
+      - key: Razorpay__WebhookSecret
+        sync: false
+
+      # ---- the customer-facing site ----
+      # Origin of the Vercel deployment. Public quotation and invoice URLs are built from it, so a
+      # wrong value produces links that resolve to nothing.
+      - key: PublicLinks__BaseUrl
+        sync: false
+      # Explicit allow-list. Never a wildcard: these are the only origins the browser may call the
+      # API from. Configuration binds Cors__AllowedOrigins__0, __1, … as an array.
+      - key: Cors__AllowedOrigins__0
+        sync: false

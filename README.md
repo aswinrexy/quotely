@@ -400,5 +400,6 @@ secrets belong.
 
 - [docs/development-workflow.md](docs/development-workflow.md) — branches, pull requests, CI, releases, hotfixes
 - [docs/environments.md](docs/environments.md) — environments, secrets, configuration, migrations
+- [docs/hosting.md](docs/hosting.md) — free-tier deployment (Vercel + Render + Supabase) and its limits
 - [docs/architecture.md](docs/architecture.md) — structure, data model, request flow, security
 - [docs/api.md](docs/api.md) — endpoint reference with payloads
