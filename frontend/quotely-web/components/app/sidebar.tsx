@@ -18,6 +18,7 @@ export const PRIMARY_NAV: NavItem[] = [
 
 export const SECONDARY_NAV: NavItem[] = [
   { href: "/business-profile", label: "Business Profile", icon: Icon.building },
+  { href: "/settings/payments", label: "Payments", icon: Icon.card },
 ];
 
 export function isActive(pathname: string, href: string) {
