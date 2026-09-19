@@ -106,6 +106,14 @@ public class ProductionStartupTests
     }
 
     [Fact]
+    public void The_demo_seeder_stops_the_deployment()
+    {
+        // It creates an account with a known password and writes that password to the log.
+        var act = () => Validate(Config(("Seed:Enabled", "true")));
+        act.Should().Throw<InvalidOperationException>().WithMessage("*Seed__Enabled*");
+    }
+
+    [Fact]
     public void A_missing_encryption_key_stops_the_deployment()
     {
         // Without it no business can connect a payment account at all, and the failure would

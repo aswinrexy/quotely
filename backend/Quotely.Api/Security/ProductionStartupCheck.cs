@@ -45,6 +45,11 @@ public static class ProductionStartupCheck
         if (configuration.GetValue("Database:AutoMigrate", false))
             problems.Add("Database__AutoMigrate must be false in production.");
 
+        // The demo seeder creates an account with a known password and writes that password to
+        // the log. Harmless in development, and a published credential in production.
+        if (configuration.GetValue("Seed:Enabled", false))
+            problems.Add("Seed__Enabled must be false in production.");
+
         // ---- merchant credential encryption ----
         // Without a key, merchants cannot connect a payment account at all. Better to refuse the
         // deployment than to run one where a core feature fails at the moment it is used.
