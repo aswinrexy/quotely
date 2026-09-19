@@ -5,8 +5,10 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth";
 import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/cn";
 import { Field, Input, PasswordInput } from "@/components/ui/field";
-import { allValid, checkEmail, checkPassword, checkRequired } from "@/lib/validation";
+import { allValid, checkEmail, checkPassword, checkRequired, passwordRules } from "@/lib/validation";
+import { Icon } from "@/components/ui/icons";
 
 export default function RegisterPage() {
   const { register } = useAuth();
@@ -104,14 +106,7 @@ export default function RegisterPage() {
           />
         </Field>
 
-        <Field
-          label="Password"
-          htmlFor="password"
-          required
-          hint="At least 8 characters."
-          check={checks.password}
-          touched={touched.password}
-        >
+        <Field label="Password" htmlFor="password" required check={checks.password} touched={touched.password}>
           <PasswordInput
             id="password"
             autoComplete="new-password"
@@ -122,6 +117,23 @@ export default function RegisterPage() {
             onBlur={() => touch("password")}
           />
         </Field>
+
+        {/*
+          The rules, ticking off as they are met. Shown as a checklist rather than as an error
+          after the fact, because these are the server's actual requirements and someone choosing
+          a password should be able to see what is wanted before being told they got it wrong.
+        */}
+        <ul className="-mt-2 space-y-1">
+          {passwordRules(form.password).map((rule) => (
+            <li
+              key={rule.label}
+              className={cn("flex items-center gap-1.5 text-caption", rule.met ? "text-mint-ink" : "text-fog")}
+            >
+              <Icon.check className={cn("h-3.5 w-3.5 shrink-0", rule.met ? "opacity-100" : "opacity-30")} />
+              {rule.label}
+            </li>
+          ))}
+        </ul>
 
         {error && (
           <p role="alert" className="rounded-btn border border-ash bg-rose-wash px-3 py-2 text-body text-rose-ink">

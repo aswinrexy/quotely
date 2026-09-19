@@ -37,8 +37,18 @@ export function formatDate(value: string) {
   });
 }
 
+/**
+ * Today, as the person in front of the screen understands it.
+ *
+ * NOT toISOString() — that converts to UTC first, so anywhere east of Greenwich returns
+ * yesterday for the early hours of the morning. In India (UTC+5:30) every invoice created before
+ * 05:30 was dated the previous day, which is exactly the bug this replaced.
+ */
 export function todayIso() {
-  return new Date().toISOString().slice(0, 10);
+  const now = new Date();
+  const month = `${now.getMonth() + 1}`.padStart(2, "0");
+  const day = `${now.getDate()}`.padStart(2, "0");
+  return `${now.getFullYear()}-${month}-${day}`;
 }
 
 export function addDaysIso(iso: string, days: number) {

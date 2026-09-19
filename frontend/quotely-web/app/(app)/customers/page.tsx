@@ -23,12 +23,15 @@ import {
   Tr,
 } from "@/components/ui/table";
 import { PageHeader } from "@/components/app/page-header";
+import { UsageHint } from "@/components/app/upgrade-notice";
+import { useEntitlements } from "@/lib/entitlements";
 import type { Customer, PagedResult } from "@/types";
 
 const PAGE_SIZE = 10;
 
 export default function CustomersPage() {
   const toast = useToast();
+  const { entitlements } = useEntitlements();
   const [search, setSearch] = useState("");
   const [debounced, setDebounced] = useState("");
   const [page, setPage] = useState(1);
@@ -87,12 +90,15 @@ export default function CustomersPage() {
         title="Customers"
         description="Manage your customers and their quotation history."
         action={
-          <Link href="/customers/new">
-            <Button>
-              <Icon.plus className="h-4 w-4" />
-              Add customer
-            </Button>
-          </Link>
+          <div className="flex flex-wrap items-center gap-3">
+            <UsageHint quota={entitlements?.customers} what="customers" />
+            <Link href="/customers/new">
+              <Button>
+                <Icon.plus className="h-4 w-4" />
+                Add customer
+              </Button>
+            </Link>
+          </div>
         }
       />
 

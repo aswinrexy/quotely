@@ -25,6 +25,8 @@ import {
   Tr,
 } from "@/components/ui/table";
 import { PageHeader } from "@/components/app/page-header";
+import { UsageHint } from "@/components/app/upgrade-notice";
+import { useEntitlements } from "@/lib/entitlements";
 import {
   INVOICE_STATUSES,
   INVOICE_STATUS_LABELS,
@@ -36,6 +38,7 @@ const PAGE_SIZE = 10;
 
 export default function InvoicesPage() {
   const toast = useToast();
+  const { entitlements } = useEntitlements();
   const [search, setSearch] = useState("");
   const [debounced, setDebounced] = useState("");
   const [status, setStatus] = useState("");
@@ -94,12 +97,15 @@ export default function InvoicesPage() {
         title="Invoices"
         description="Bill a customer directly, or raise one from an accepted quotation."
         action={
-          <Link href="/invoices/new">
-            <Button>
-              <Icon.plus className="h-4 w-4" />
-              Create invoice
-            </Button>
-          </Link>
+          <div className="flex flex-wrap items-center gap-3">
+            <UsageHint quota={entitlements?.invoices} what="invoices" />
+            <Link href="/invoices/new">
+              <Button>
+                <Icon.plus className="h-4 w-4" />
+                Create invoice
+              </Button>
+            </Link>
+          </div>
         }
       />
 

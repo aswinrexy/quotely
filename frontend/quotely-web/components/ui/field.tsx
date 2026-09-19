@@ -105,17 +105,20 @@ export function Field({ label, htmlFor, error, hint, required, className, check,
 
   // The hint or error is wired onto the control itself, so a screen reader announces it with the
   // field rather than leaving it as loose text nearby.
-  const control =
-    describedBy || shownError
-      ? Children.map(children, (child) =>
-          isValidElement<{ "aria-describedby"?: string; "aria-invalid"?: boolean }>(child)
-            ? cloneElement(child, {
-                "aria-describedby": child.props["aria-describedby"] ?? describedBy,
-                "aria-invalid": shownError ? true : child.props["aria-invalid"],
-              })
-            : child,
-        )
-      : children;
+  //
+  // This runs UNCONDITIONALLY. It used to be skipped when there was nothing to describe, which
+  // meant `control` alternated between the original children and a cloned copy as an error
+  // appeared or cleared. React saw a different element each time and remounted the input —
+  // so the caret vanished mid-typing and the field had to be clicked again. Cloning every time
+  // costs nothing and keeps the element stable.
+  const control = Children.map(children, (child) =>
+    isValidElement<{ "aria-describedby"?: string; "aria-invalid"?: boolean }>(child)
+      ? cloneElement(child, {
+          "aria-describedby": child.props["aria-describedby"] ?? describedBy,
+          "aria-invalid": shownError ? true : child.props["aria-invalid"],
+        })
+      : child,
+  );
 
   return (
     <div className={cn("space-y-1.5", className)}>

@@ -20,9 +20,12 @@ public class BillingOptions
     public bool Enabled { get; set; }
 
     /// <summary>
-    /// Whether an expired subscription actually restricts anything. Separate from
-    /// <see cref="Enabled"/> so billing can be introduced — plans visible, subscriptions real —
-    /// before the day anybody is locked out of creating an invoice.
+    /// Whether the free-tier limits actually bite. Separate from <see cref="Enabled"/> so billing
+    /// can be introduced — plans visible, subscriptions real — before the day anybody is stopped.
+    ///
+    /// CAUTION: turning this on without <see cref="Enabled"/> leaves a business that hits a limit
+    /// with no way to pay their way past it. Startup validation refuses that combination in
+    /// production rather than letting it happen quietly.
     /// </summary>
     public bool EnforceEntitlements { get; set; }
 
@@ -86,8 +89,15 @@ public class BillingPlanOptions
 }
 
 /// <summary>
-/// One switch per thing a business might be stopped from doing. Read by
-/// <c>ISubscriptionEntitlementService</c> and nowhere else.
+/// What a business may do WITHOUT a paid subscription — the free tier.
+///
+/// Read by <c>ISubscriptionEntitlementService</c> and nowhere else. Every value is configuration
+/// rather than a constant, because where the free tier stops is a commercial decision that should
+/// not need a deployment to change.
+///
+/// The shape of the tier: the product is fully VISIBLE, and a business can run a real if small
+/// operation on it — a handful of customers, a short catalogue, a modest number of invoices.
+/// What it cannot do is quote, take card payments, or grow past those counts.
 /// </summary>
 public class EntitlementOptions
 {
@@ -104,14 +114,35 @@ public class EntitlementOptions
     /// <summary>Reaching the billing page, which is how they would fix this.</summary>
     public bool CanManageBilling { get; set; } = true;
 
-    // ---- what actually stops ----
+    // ---- what a free account cannot do at all ----
 
+    /// <summary>Quotations are a paid feature. Invoicing is the free tier's whole job.</summary>
     public bool CanCreateQuotation { get; set; }
-    public bool CanCreateInvoice { get; set; }
 
     /// <summary>
-    /// Whether invoices already issued can still be paid. True on purpose: a customer settling an
-    /// invoice they were sent last week is not the person whose subscription lapsed, and that
+    /// Connecting a payment account is paid. A free business still gets paid — by cash, transfer
+    /// or cheque, recorded manually — it just cannot put a Pay button on an invoice.
+    /// </summary>
+    public bool CanConnectPayments { get; set; }
+
+    // ---- what a free account can do, up to a point ----
+
+    /// <summary>
+    /// Invoices a free account may create in total. Null means no limit.
+    ///
+    /// A total rather than a monthly allowance, deliberately: a monthly reset invites someone to
+    /// wait out the calendar rather than decide, and it needs a clock nobody can see. A lifetime
+    /// count is a number a person can hold in their head.
+    /// </summary>
+    public int? MaxInvoices { get; set; } = 10;
+
+    public int? MaxCustomers { get; set; } = 5;
+
+    public int? MaxProducts { get; set; } = 10;
+
+    /// <summary>
+    /// Whether an existing invoice can still be paid online. True on purpose: a customer settling
+    /// an invoice they were sent last week is not the person whose subscription lapsed, and that
     /// money belongs to the business regardless of what they owe us.
     /// </summary>
     public bool CanAcceptPayments { get; set; } = true;
