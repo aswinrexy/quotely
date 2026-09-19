@@ -265,7 +265,6 @@ function CouponCard({ onRedeemed }: { onRedeemed: (subscription: Subscription) =
             id="coupon"
             value={code}
             onChange={(e) => setCode(e.target.value.toUpperCase())}
-            placeholder="QUOTELY6"
             className="font-mono uppercase"
             autoComplete="off"
             spellCheck={false}

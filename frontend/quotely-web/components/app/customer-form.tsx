@@ -7,6 +7,7 @@ import { useToast } from "@/components/ui/toast";
 import { Button } from "@/components/ui/button";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
 import { Field, Input, Textarea } from "@/components/ui/field";
+import { checkEmail, checkPhone, checkRequired } from "@/lib/validation";
 import type { Customer } from "@/types";
 
 type CustomerFormValues = Omit<Customer, "id" | "createdAt">;
@@ -30,6 +31,17 @@ export function CustomerForm({ customer }: { customer?: Customer }) {
   const [form, setForm] = useState<CustomerFormValues>({ ...EMPTY, ...customer });
   const [errors, setErrors] = useState<Partial<Record<keyof CustomerFormValues, string>>>({});
   const [saving, setSaving] = useState(false);
+  const [touched, setTouched] = useState<Record<string, boolean>>({});
+
+  const checks = {
+    name: checkRequired(form.name, "A customer name"),
+    email: checkEmail(form.email ?? "", false),
+    phone: checkPhone(form.phone ?? ""),
+  };
+
+  function touch(key: string) {
+    setTouched((current) => ({ ...current, [key]: true }));
+  }
 
   function update<K extends keyof CustomerFormValues>(key: K, value: CustomerFormValues[K]) {
     setForm((current) => ({ ...current, [key]: value }));
@@ -85,12 +97,19 @@ export function CustomerForm({ customer }: { customer?: Customer }) {
         <CardHeader title={customer ? "Edit customer" : "New customer"} />
         <CardBody className="space-y-5">
           <div className="grid gap-4 sm:grid-cols-2">
-            <Field label="Customer name" htmlFor="name" required error={errors.name}>
+            <Field
+              label="Customer name"
+              htmlFor="name"
+              required
+              error={errors.name}
+              check={checks.name}
+              touched={touched.name}
+            >
               <Input
                 id="name"
                 value={form.name}
                 onChange={(e) => update("name", e.target.value)}
-                placeholder="John Smith"
+                onBlur={() => touch("name")}
               />
             </Field>
             <Field label="Company name" htmlFor="companyName">
@@ -98,24 +117,34 @@ export function CustomerForm({ customer }: { customer?: Customer }) {
                 id="companyName"
                 value={form.companyName ?? ""}
                 onChange={(e) => update("companyName", e.target.value)}
-                placeholder="John Smith Construction"
               />
             </Field>
-            <Field label="Email" htmlFor="email" error={errors.email}>
+            <Field
+              label="Email"
+              htmlFor="email"
+              error={errors.email}
+              check={checks.email}
+              touched={touched.email}
+            >
               <Input
                 id="email"
                 type="email"
+                inputMode="email"
                 value={form.email ?? ""}
                 onChange={(e) => update("email", e.target.value)}
-                placeholder="john@example.com"
+                onBlur={() => touch("email")}
               />
             </Field>
-            <Field label="Phone" htmlFor="phone">
+            <Field label="Phone" htmlFor="phone" check={checks.phone} touched={touched.phone}>
               <Input
                 id="phone"
+                type="tel"
+                // Brings up the phone keypad on a mobile, which is most of where these get typed.
+                inputMode="tel"
+                autoComplete="tel"
                 value={form.phone ?? ""}
                 onChange={(e) => update("phone", e.target.value)}
-                placeholder="+91 98765 43210"
+                onBlur={() => touch("phone")}
               />
             </Field>
           </div>
@@ -152,7 +181,6 @@ export function CustomerForm({ customer }: { customer?: Customer }) {
               id="notes"
               value={form.notes ?? ""}
               onChange={(e) => update("notes", e.target.value)}
-              placeholder="Anything worth remembering about this customer."
             />
           </Field>
         </CardBody>

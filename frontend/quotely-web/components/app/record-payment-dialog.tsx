@@ -171,7 +171,6 @@ export function RecordPaymentDialog({
               value={reference}
               maxLength={100}
               onChange={(e) => setReference(e.target.value)}
-              placeholder="Optional"
             />
           </Field>
         </div>
@@ -183,7 +182,6 @@ export function RecordPaymentDialog({
             maxLength={500}
             rows={2}
             onChange={(e) => setNotes(e.target.value)}
-            placeholder="Optional — only you see this"
           />
         </Field>
       </div>

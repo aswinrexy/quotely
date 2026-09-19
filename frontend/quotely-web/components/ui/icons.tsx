@@ -63,6 +63,22 @@ export const Icon = {
       <path d="M7.5 8.5h3M7.5 12.5h3M7.5 16.5h3M17 14.5h0M17 18h0" />
     </Svg>
   ),
+  /** Shown while a password is hidden — press to reveal. */
+  eye: (p: IconProps) => (
+    <Svg {...p}>
+      <path d="M2.5 12S5.5 5.5 12 5.5 21.5 12 21.5 12 18.5 18.5 12 18.5 2.5 12 2.5 12Z" />
+      <circle cx="12" cy="12" r="3" />
+    </Svg>
+  ),
+  /** Shown while a password is visible — press to hide. */
+  eyeOff: (p: IconProps) => (
+    <Svg {...p}>
+      <path d="M9.9 5.7A8.7 8.7 0 0 1 12 5.5c6.5 0 9.5 6.5 9.5 6.5a16 16 0 0 1-2.4 3.4" />
+      <path d="M6.3 7.8A16 16 0 0 0 2.5 12S5.5 18.5 12 18.5a8.9 8.9 0 0 0 3.6-.73" />
+      <path d="M9.9 9.9a3 3 0 0 0 4.2 4.2" />
+      <path d="M3.5 3.5 20.5 20.5" />
+    </Svg>
+  ),
   /** A payment card. Used for the business's own payment-account settings. */
   card: (p: IconProps) => (
     <Svg {...p}>

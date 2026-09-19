@@ -300,13 +300,11 @@ export function InvoiceForm({ initialCustomerId }: { initialCustomerId?: string 
                       aria-label={`Description for line ${index + 1}`}
                       value={row.name}
                       onChange={(e) => updateRow(row.key, { name: e.target.value })}
-                      placeholder="Item name"
                     />
                     <Input
                       aria-label={`Detail for line ${index + 1}`}
                       value={row.description}
                       onChange={(e) => updateRow(row.key, { description: e.target.value })}
-                      placeholder="Optional detail shown on the PDF"
                       className="text-caption"
                     />
                     <div className="lg:hidden">
@@ -407,7 +405,6 @@ export function InvoiceForm({ initialCustomerId }: { initialCustomerId?: string 
                 id="notes"
                 value={notes}
                 onChange={(e) => setNotes(e.target.value)}
-                placeholder="Thank you for your business."
               />
             </Field>
             <Field label="Terms & conditions" htmlFor="terms">

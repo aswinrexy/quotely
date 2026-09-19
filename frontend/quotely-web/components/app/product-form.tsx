@@ -91,7 +91,6 @@ export function ProductForm({ product }: { product?: Product }) {
               id="name"
               value={form.name}
               onChange={(e) => update("name", e.target.value)}
-              placeholder="AC Installation"
             />
           </Field>
 
@@ -100,7 +99,6 @@ export function ProductForm({ product }: { product?: Product }) {
               id="description"
               value={form.description}
               onChange={(e) => update("description", e.target.value)}
-              placeholder="What is included in this service?"
             />
           </Field>
 
@@ -124,7 +122,6 @@ export function ProductForm({ product }: { product?: Product }) {
                 inputMode="decimal"
                 value={form.price}
                 onChange={(e) => update("price", e.target.value)}
-                placeholder="5000"
               />
             </Field>
 
@@ -138,7 +135,6 @@ export function ProductForm({ product }: { product?: Product }) {
                 inputMode="decimal"
                 value={form.taxRate}
                 onChange={(e) => update("taxRate", e.target.value)}
-                placeholder="18"
               />
             </Field>
           </div>

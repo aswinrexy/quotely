@@ -5,7 +5,8 @@ import { api, ApiError } from "@/lib/api";
 import { useToast } from "@/components/ui/toast";
 import { Button } from "@/components/ui/button";
 import { Card, CardBody, CardHeader, Panel, SectionCard } from "@/components/ui/card";
-import { Field, Input } from "@/components/ui/field";
+import { Field, Input, PasswordInput } from "@/components/ui/field";
+import { checkRazorpayKeyId } from "@/lib/validation";
 import { ConfirmDialog } from "@/components/ui/dialog";
 import { DetailSkeleton, ErrorState } from "@/components/ui/states";
 import { PageHeader } from "@/components/app/page-header";
@@ -323,6 +324,9 @@ function KeyPairForm({ onConnected }: { onConnected: (result: MerchantConnection
   const [displayName, setDisplayName] = useState("");
   const [saving, setSaving] = useState(false);
   const [fieldError, setFieldError] = useState<string | null>(null);
+  const [touched, setTouched] = useState<Record<string, boolean>>({});
+
+  const keyIdCheck = checkRazorpayKeyId(keyId);
 
   async function onSubmit(event: React.FormEvent) {
     event.preventDefault();
@@ -359,14 +363,22 @@ function KeyPairForm({ onConnected }: { onConnected: (result: MerchantConnection
         → API Keys</strong> and generate a key. Paste both halves here.
       </p>
 
-      <Field label="Key ID" htmlFor="rzp-key-id" required hint="Begins with rzp_">
+      <Field
+        label="Key ID"
+        htmlFor="rzp-key-id"
+        required
+        hint="Begins with rzp_"
+        check={keyIdCheck}
+        touched={touched.keyId}
+      >
         <Input
           id="rzp-key-id"
           value={keyId}
           onChange={(e) => setKeyId(e.target.value)}
-          placeholder="rzp_test_…"
+          onBlur={() => setTouched((c) => ({ ...c, keyId: true }))}
           autoComplete="off"
           spellCheck={false}
+          className="font-mono"
           required
         />
       </Field>
@@ -378,14 +390,15 @@ function KeyPairForm({ onConnected }: { onConnected: (result: MerchantConnection
         error={fieldError}
         hint="Stored encrypted. Quotely never shows it again, and never sends it to your customers."
       >
-        <Input
+        <PasswordInput
           id="rzp-key-secret"
-          // A password field, so it is masked on a shared screen and kept out of autofill.
-          type="password"
+          // Masked on a shared screen and kept out of autofill, but revealable — pasting a
+          // Razorpay secret and being unable to check it is how a typo gets saved.
           value={keySecret}
           onChange={(e) => setKeySecret(e.target.value)}
           autoComplete="new-password"
           spellCheck={false}
+          className="font-mono"
           required
         />
       </Field>
@@ -395,7 +408,6 @@ function KeyPairForm({ onConnected }: { onConnected: (result: MerchantConnection
           id="rzp-label"
           value={displayName}
           onChange={(e) => setDisplayName(e.target.value)}
-          placeholder="Main business account"
           maxLength={100}
         />
       </Field>
