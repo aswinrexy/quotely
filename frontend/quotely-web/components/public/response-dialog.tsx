@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Field, Input, Textarea } from "@/components/ui/field";
+import { checkEmail, checkRequired } from "@/lib/validation";
 import type { PublicResponseRequest } from "@/types";
 
 export type ResponseKind = "accept" | "reject";
@@ -34,6 +35,11 @@ export function ResponseDialog({
   const [comment, setComment] = useState("");
   const [nameError, setNameError] = useState<string | null>(null);
   const [emailError, setEmailError] = useState<string | null>(null);
+  const [touched, setTouched] = useState<Record<string, boolean>>({});
+
+  // This is a customer, not a signed-in user — they get one attempt at this and no support
+  // channel, so the feedback has to be immediate and obvious.
+  const checks = { name: checkRequired(name, "Your name"), email: checkEmail(email, false) };
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -87,24 +93,39 @@ export function ResponseDialog({
         </p>
 
         <form onSubmit={submit} className="mt-5 space-y-4" noValidate>
-          <Field label="Your name" htmlFor="response-name" required error={nameError}>
+          <Field
+            label="Your name"
+            htmlFor="response-name"
+            required
+            error={nameError}
+            check={checks.name}
+            touched={touched.name}
+          >
             <Input
               id="response-name"
               value={name}
               autoComplete="name"
               onChange={(e) => setName(e.target.value)}
-              placeholder="John Smith"
+              onBlur={() => setTouched((c) => ({ ...c, name: true }))}
             />
           </Field>
 
-          <Field label="Email" htmlFor="response-email" error={emailError} hint="Optional.">
+          <Field
+            label="Email"
+            htmlFor="response-email"
+            error={emailError}
+            hint="Optional."
+            check={checks.email}
+            touched={touched.email}
+          >
             <Input
               id="response-email"
               type="email"
+              inputMode="email"
               value={email}
               autoComplete="email"
               onChange={(e) => setEmail(e.target.value)}
-              placeholder="john@example.com"
+              onBlur={() => setTouched((c) => ({ ...c, email: true }))}
             />
           </Field>
 
@@ -118,7 +139,6 @@ export function ResponseDialog({
               value={comment}
               maxLength={COMMENT_LIMIT}
               onChange={(e) => setComment(e.target.value)}
-              placeholder={accepting ? "Approved. Please proceed." : "The price is outside our budget."}
             />
           </Field>
 

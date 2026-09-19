@@ -7,6 +7,7 @@ import { useToast } from "@/components/ui/toast";
 import { Button } from "@/components/ui/button";
 import { Card, SectionCard } from "@/components/ui/card";
 import { Field, Input, Select } from "@/components/ui/field";
+import { checkEmail, checkPhone, checkRequired, checkTaxNumber } from "@/lib/validation";
 import { DetailSkeleton, ErrorState } from "@/components/ui/states";
 import { PageHeader } from "@/components/app/page-header";
 import type { BusinessProfile } from "@/types";
@@ -35,6 +36,18 @@ export default function BusinessProfilePage() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [nameError, setNameError] = useState<string | null>(null);
+  const [touched, setTouched] = useState<Record<string, boolean>>({});
+
+  const checks = {
+    businessName: checkRequired(form.businessName, "A business name"),
+    businessEmail: checkEmail(form.businessEmail ?? "", false),
+    phone: checkPhone(form.phone ?? ""),
+    taxNumber: checkTaxNumber(form.taxNumber ?? ""),
+  };
+
+  function touch(key: string) {
+    setTouched((current) => ({ ...current, [key]: true }));
+  }
   const fileInput = useRef<HTMLInputElement>(null);
 
   const load = useCallback(async () => {
@@ -138,21 +151,40 @@ export default function BusinessProfilePage() {
           description="The name and tax details printed at the top of your documents."
         >
           <div className="grid gap-4 sm:grid-cols-2">
-            <Field label="Business name" htmlFor="businessName" required error={nameError}>
+            <Field
+              label="Business name"
+              htmlFor="businessName"
+              required
+              error={nameError}
+              check={checks.businessName}
+              touched={touched.businessName}
+            >
               <Input
                 id="businessName"
+                autoComplete="organization"
                 value={form.businessName}
                 onChange={(e) => update("businessName", e.target.value)}
-                placeholder="ABC Electricals"
+                onBlur={() => touch("businessName")}
                 aria-invalid={nameError ? true : undefined}
               />
             </Field>
-            <Field label="Tax / GST number" htmlFor="taxNumber">
+            <Field
+              label="Tax / GST number"
+              htmlFor="taxNumber"
+              hint="15 characters, like 33ABCDE1234F1Z5. Leave blank if you are not registered."
+              check={checks.taxNumber}
+              touched={touched.taxNumber}
+            >
               <Input
                 id="taxNumber"
                 value={form.taxNumber ?? ""}
-                onChange={(e) => update("taxNumber", e.target.value)}
-                placeholder="33ABCDE1234F1Z5"
+                // Stored and printed upper-case, so it is normalised as it is typed rather than
+                // silently changing under the owner after they save.
+                onChange={(e) => update("taxNumber", e.target.value.toUpperCase())}
+                onBlur={() => touch("taxNumber")}
+                maxLength={15}
+                spellCheck={false}
+                className="font-mono"
               />
             </Field>
           </div>
@@ -164,22 +196,31 @@ export default function BusinessProfilePage() {
         >
           <div className="space-y-4">
             <div className="grid gap-4 sm:grid-cols-2">
-              <Field label="Business email" htmlFor="businessEmail">
+              <Field
+                label="Business email"
+                htmlFor="businessEmail"
+                check={checks.businessEmail}
+                touched={touched.businessEmail}
+              >
                 <Input
                   id="businessEmail"
                   type="email"
+                  inputMode="email"
+                  autoComplete="email"
                   value={form.businessEmail ?? ""}
                   onChange={(e) => update("businessEmail", e.target.value)}
-                  placeholder="hello@business.com"
+                  onBlur={() => touch("businessEmail")}
                 />
               </Field>
-              <Field label="Phone" htmlFor="phone">
+              <Field label="Phone" htmlFor="phone" check={checks.phone} touched={touched.phone}>
                 <Input
                   id="phone"
                   type="tel"
+                  inputMode="tel"
+                  autoComplete="tel"
                   value={form.phone ?? ""}
                   onChange={(e) => update("phone", e.target.value)}
-                  placeholder="+91 98765 43210"
+                  onBlur={() => touch("phone")}
                 />
               </Field>
             </div>
@@ -189,7 +230,6 @@ export default function BusinessProfilePage() {
                 id="addressLine"
                 value={form.addressLine ?? ""}
                 onChange={(e) => update("addressLine", e.target.value)}
-                placeholder="123 Main Street"
               />
             </Field>
 

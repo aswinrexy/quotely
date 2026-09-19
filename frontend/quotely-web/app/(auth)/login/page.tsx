@@ -5,7 +5,8 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth";
 import { Button } from "@/components/ui/button";
-import { Field, Input } from "@/components/ui/field";
+import { Field, Input, PasswordInput } from "@/components/ui/field";
+import { checkEmail } from "@/lib/validation";
 
 export default function LoginPage() {
   const { login, user, ready } = useAuth();
@@ -14,6 +15,9 @@ export default function LoginPage() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [touched, setTouched] = useState({ email: false });
+
+  const emailCheck = checkEmail(email);
 
   useEffect(() => {
     if (ready && user) router.replace("/dashboard");
@@ -39,7 +43,7 @@ export default function LoginPage() {
       <p className="mt-1 text-body text-fog">Welcome back. Enter your details to continue.</p>
 
       <form onSubmit={onSubmit} className="mt-6 space-y-4" noValidate>
-        <Field label="Email" htmlFor="email" required>
+        <Field label="Email" htmlFor="email" required check={emailCheck} touched={touched.email}>
           <Input
             id="email"
             type="email"
@@ -47,19 +51,19 @@ export default function LoginPage() {
             required
             value={email}
             onChange={(e) => setEmail(e.target.value)}
-            placeholder="you@business.com"
+            onBlur={() => setTouched({ email: true })}
           />
         </Field>
 
+        {/* No validation tick on the way in: the password is either the right one or it is not,
+            and only the server knows which. A tick here would be meaningless reassurance. */}
         <Field label="Password" htmlFor="password" required>
-          <Input
+          <PasswordInput
             id="password"
-            type="password"
             autoComplete="current-password"
             required
             value={password}
             onChange={(e) => setPassword(e.target.value)}
-            placeholder="••••••••"
           />
         </Field>
 
