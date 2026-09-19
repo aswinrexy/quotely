@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Quotely.Api.Data;
 using Quotely.Api.DTOs;
+using Quotely.Api.Billing;
 using Quotely.Api.Services;
 
 namespace Quotely.Api.Controllers;
@@ -50,6 +51,14 @@ public class QuotationsController : ControllerBase
     public async Task<ActionResult<QuotationDto>> Get(Guid id, CancellationToken ct)
         => Ok(await _quotations.GetAsync(_currentUser.Id, id, ct));
 
+    /// <summary>
+    /// Gated on the subscription. This is one of exactly three places in the application where
+    /// that happens — creating a quotation, creating an invoice, and raising an invoice from a
+    /// quotation — and the rule itself lives in ISubscriptionEntitlementService, not here.
+    /// </summary>
+    [RequiresEntitlement(
+        Entitlement.CreateQuotation,
+        "Your Quotely subscription has ended. You can still view and export everything you have, and start again from Billing.")]
     [HttpPost]
     public async Task<ActionResult<QuotationDto>> Create(SaveQuotationRequest request, CancellationToken ct)
     {
@@ -82,6 +91,10 @@ public class QuotationsController : ControllerBase
     /// Raises the invoice for an accepted quotation. Only Accepted quotations convert, and only
     /// once: a second call reports the existing invoice as a conflict rather than duplicating it.
     /// </summary>
+    /// <summary>Gated on the subscription; see the note on QuotationsController.Create.</summary>
+    [RequiresEntitlement(
+        Entitlement.CreateInvoice,
+        "Your Quotely subscription has ended. You can still view and export everything you have, and start again from Billing.")]
     [HttpPost("{id:guid}/convert-to-invoice")]
     [ProducesResponseType(typeof(InvoiceDto), StatusCodes.Status201Created)]
     [ProducesResponseType(StatusCodes.Status409Conflict)]

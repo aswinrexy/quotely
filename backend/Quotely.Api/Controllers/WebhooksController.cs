@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Quotely.Api.Billing;
 using Quotely.Api.Services;
 
 namespace Quotely.Api.Controllers;
@@ -15,8 +16,22 @@ namespace Quotely.Api.Controllers;
 public class WebhooksController : ControllerBase
 {
     private readonly IWebhookService _webhooks;
+    private readonly ISubscriptionWebhookService _billing;
 
-    public WebhooksController(IWebhookService webhooks) => _webhooks = webhooks;
+    public WebhooksController(IWebhookService webhooks, ISubscriptionWebhookService billing)
+    {
+        _webhooks = webhooks;
+        _billing = billing;
+    }
+
+    /// <summary>Reads the body as the provider sent it. Both handlers need the exact bytes.</summary>
+    private async Task<string> RawBodyAsync(CancellationToken ct)
+    {
+        // Razorpay signs the exact bytes it sent, so deserialising and re-serialising first —
+        // which reorders keys and changes whitespace — would break every signature check.
+        using var reader = new StreamReader(Request.Body);
+        return await reader.ReadToEndAsync(ct);
+    }
 
     /// <summary>
     /// A merchant's payment webhook. The route token in the URL is what says which business the
@@ -33,11 +48,7 @@ public class WebhooksController : ControllerBase
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     public async Task<IActionResult> RazorpayMerchant(string routeToken, CancellationToken ct)
     {
-        // The body is read as a string and passed through untouched. Razorpay signs the exact
-        // bytes it sent, so deserialising and re-serialising first — which reorders keys and
-        // changes whitespace — would break every signature check.
-        using var reader = new StreamReader(Request.Body);
-        var rawBody = await reader.ReadToEndAsync(ct);
+        var rawBody = await RawBodyAsync(ct);
 
         var accepted = await _webhooks.HandleMerchantAsync(
             routeToken,
@@ -47,6 +58,29 @@ public class WebhooksController : ControllerBase
             ct);
 
         // Deliberately terse: a webhook response is not a place to describe internal state.
+        return accepted ? Ok(new { status = "ok" }) : BadRequest(new { status = "rejected" });
+    }
+
+    /// <summary>
+    /// QUOTELY'S OWN subscription webhooks — a business paying us, not a customer paying them.
+    ///
+    /// A separate path with a separate handler and a separate secret. The merchant endpoint above
+    /// cannot accept one of these and this cannot accept one of those, which is the point: one
+    /// bug in either must not be able to move the other kind of money.
+    /// </summary>
+    [HttpPost("razorpay/billing")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    public async Task<IActionResult> RazorpayBilling(CancellationToken ct)
+    {
+        var rawBody = await RawBodyAsync(ct);
+
+        var accepted = await _billing.HandleAsync(
+            rawBody,
+            Request.Headers["X-Razorpay-Signature"].FirstOrDefault(),
+            Request.Headers["X-Razorpay-Event-Id"].FirstOrDefault(),
+            ct);
+
         return accepted ? Ok(new { status = "ok" }) : BadRequest(new { status = "rejected" });
     }
 }

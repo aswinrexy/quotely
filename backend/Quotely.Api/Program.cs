@@ -13,6 +13,7 @@ using Quotely.Api.Models;
 using Quotely.Api.Payments;
 using Quotely.Api.Pdf;
 using Quotely.Api.Security;
+using Quotely.Api.Billing;
 using Quotely.Api.Services;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -132,6 +133,16 @@ builder.Services.AddScoped<IPaymentService, PaymentService>();
 builder.Services.AddScoped<IWebhookService, WebhookService>();
 builder.Services.AddScoped<IMerchantConnectionService, MerchantConnectionService>();
 
+// ---- Quotely's own SaaS billing ----
+// The SECOND money flow, and the one that pays for the product. Registered separately from the
+// merchant payment services above and sharing no credentials with them.
+builder.Services.Configure<BillingOptions>(builder.Configuration.GetSection(BillingOptions.SectionName));
+builder.Services.AddHttpClient<ISaasBillingProvider, RazorpaySaasBillingProvider>();
+builder.Services.AddScoped<ISubscriptionService, SubscriptionService>();
+builder.Services.AddScoped<ISubscriptionEntitlementService, SubscriptionEntitlementService>();
+builder.Services.AddScoped<ISubscriptionWebhookService, SubscriptionWebhookService>();
+builder.Services.Configure<AdminOptions>(builder.Configuration.GetSection(AdminOptions.SectionName));
+
 // ---- payments ----
 // TWO SEPARATE MONEY FLOWS, and they do not share credentials.
 //
@@ -240,6 +251,10 @@ if (builder.Configuration.GetValue("Database:AutoMigrate", app.Environment.IsDev
     else
         await db.Database.MigrateAsync();
 }
+
+// The coupons Quotely ships with. Idempotent: a code that already exists is left exactly as it
+// is, so a restart never resets a redemption count or revives a coupon somebody withdrew.
+await CouponSeeder.SeedAsync(app.Services);
 
 if (builder.Configuration.GetValue("Seed:Enabled", app.Environment.IsDevelopment()))
     await DevSeeder.SeedAsync(app.Services);

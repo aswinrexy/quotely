@@ -22,6 +22,12 @@ public class AppDbContext : IdentityDbContext<AppUser, IdentityRole<Guid>, Guid>
     public DbSet<WebhookEvent> WebhookEvents => Set<WebhookEvent>();
     public DbSet<MerchantPaymentConnection> MerchantPaymentConnections => Set<MerchantPaymentConnection>();
 
+    // ---- Quotely's own SaaS billing. A different kind of money from everything above: these
+    // ---- are businesses paying US, not customers paying them.
+    public DbSet<Subscription> Subscriptions => Set<Subscription>();
+    public DbSet<Coupon> Coupons => Set<Coupon>();
+    public DbSet<CouponRedemption> CouponRedemptions => Set<CouponRedemption>();
+
     /// <summary>
     /// Neither SQL Server's datetime2 nor SQLite stores a timezone, so values read back arrive as
     /// DateTimeKind.Unspecified and serialize without a "Z" — which a browser then reads as local
@@ -246,6 +252,59 @@ public class AppDbContext : IdentityDbContext<AppUser, IdentityRole<Guid>, Guid>
 
             e.HasOne(x => x.User).WithMany()
                 .HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        b.Entity<Subscription>(e =>
+        {
+            // One subscription per business. Enforced by the database so two requests from a new
+            // account cannot each create a trial.
+            e.HasIndex(x => x.UserId).IsUnique();
+
+            // How a billing webhook finds the subscription it is about.
+            e.HasIndex(x => x.ProviderSubscriptionId).IsUnique();
+
+            // "Whose access is about to lapse?" — the query a reconciliation pass would run.
+            e.HasIndex(x => new { x.Status, x.TrialEnd });
+
+            e.Property(x => x.PlanCode).HasMaxLength(40).IsRequired();
+            e.Property(x => x.Currency).HasMaxLength(3).IsRequired();
+            e.Property(x => x.Provider).HasMaxLength(30).IsRequired();
+            e.Property(x => x.ProviderSubscriptionId).HasMaxLength(80);
+            e.Property(x => x.ProviderPlanId).HasMaxLength(80);
+            e.Property(x => x.StatusMessage).HasMaxLength(300);
+            e.Property(x => x.Price).HasPrecision(18, 2);
+            e.Property(x => x.ConcurrencyStamp).IsConcurrencyToken();
+
+            e.HasOne(x => x.User).WithOne()
+                .HasForeignKey<Subscription>(x => x.UserId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        b.Entity<Coupon>(e =>
+        {
+            // The lookup key, and the guarantee that one code means one coupon.
+            e.HasIndex(x => x.Code).IsUnique();
+            e.Property(x => x.Code).HasMaxLength(40).IsRequired();
+            e.Property(x => x.Description).HasMaxLength(200).IsRequired();
+            e.Property(x => x.ConcurrencyStamp).IsConcurrencyToken();
+        });
+
+        b.Entity<CouponRedemption>(e =>
+        {
+            // ONE REDEMPTION PER ACCOUNT, enforced here rather than by a service-level check.
+            // Two concurrent requests can both pass "have they already redeemed this?"; only one
+            // of them can win this insert.
+            e.HasIndex(x => new { x.CouponId, x.UserId }).IsUnique();
+            e.HasIndex(x => x.UserId);
+            e.Property(x => x.CodeUsed).HasMaxLength(40).IsRequired();
+
+            e.HasOne(x => x.Coupon).WithMany(c => c.Redemptions)
+                .HasForeignKey(x => x.CouponId).OnDelete(DeleteBehavior.Cascade);
+            e.HasOne(x => x.Subscription).WithMany(s => s.Redemptions)
+                .HasForeignKey(x => x.SubscriptionId).OnDelete(DeleteBehavior.Cascade);
+            // No second cascade path to AspNetUsers: SQL Server rejects multiple cascade routes,
+            // and a redemption already disappears with its subscription.
+            e.HasOne(x => x.User).WithMany()
+                .HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.NoAction);
         });
 
         b.Entity<WebhookEvent>(e =>
