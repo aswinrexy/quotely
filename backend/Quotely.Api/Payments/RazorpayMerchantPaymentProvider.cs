@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Net;
 using System.Net.Http.Headers;
 using System.Security.Cryptography;
 using System.Text;
@@ -9,41 +10,40 @@ using Quotely.Api.Models;
 namespace Quotely.Api.Payments;
 
 /// <summary>
-/// Razorpay adapter. Everything Razorpay-shaped lives here: the REST calls, the HMAC signature
-/// schemes, and the mapping from Razorpay's status vocabulary onto ours. The rest of the
-/// application sees only the models in PaymentModels.cs.
+/// Razorpay adapter for MERCHANT money — a customer paying a business that uses Quotely.
+/// Everything Razorpay-shaped lives here: the REST calls, the HMAC signature schemes, and the
+/// mapping from Razorpay's status vocabulary onto ours.
 ///
-/// No SDK is used. Razorpay's maintained .NET package is stale, and this integration is one
-/// POST, one GET and two HMAC verifications — not worth a dependency.
+/// The one structural difference from V2.6: this class holds no credentials of its own. They
+/// arrive per call on a <see cref="MerchantPaymentContext"/> and are attached to that one request.
+/// A shared HttpClient with a constructor-set Authorization header — which is what this used to
+/// be — is exactly how one tenant's payment ends up in another tenant's account, because the
+/// header outlives the request that set it.
+///
+/// No SDK is used. Razorpay's maintained .NET package is stale, and this integration is a handful
+/// of REST calls and two HMAC verifications.
 /// </summary>
-public class RazorpayPaymentProvider : IPaymentProvider
+public class RazorpayMerchantPaymentProvider : IMerchantPaymentProvider
 {
     private readonly HttpClient _http;
     private readonly RazorpayOptions _options;
-    private readonly ILogger<RazorpayPaymentProvider> _logger;
+    private readonly ILogger<RazorpayMerchantPaymentProvider> _logger;
 
-    public RazorpayPaymentProvider(
+    public RazorpayMerchantPaymentProvider(
         HttpClient http,
         IOptions<RazorpayOptions> options,
-        ILogger<RazorpayPaymentProvider> logger)
+        ILogger<RazorpayMerchantPaymentProvider> logger)
     {
         _options = options.Value;
         _logger = logger;
         _http = http;
         _http.BaseAddress = new Uri(_options.BaseUrl);
         _http.Timeout = TimeSpan.FromSeconds(_options.TimeoutSeconds);
-
-        if (_options.IsConfigured)
-        {
-            var basic = Convert.ToBase64String(
-                Encoding.UTF8.GetBytes($"{_options.KeyId}:{_options.KeySecret}"));
-            _http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Basic", basic);
-        }
+        // Note what is NOT set here: DefaultRequestHeaders.Authorization. This client is shared by
+        // every tenant, so a default credential on it would be a cross-tenant leak by construction.
     }
 
     public string Name => PaymentProviders.Razorpay;
-    public string PublicKey => _options.KeyId;
-    public bool IsConfigured => _options.IsConfigured;
 
     // ---- money ---------------------------------------------------------
 
@@ -63,10 +63,9 @@ public class RazorpayPaymentProvider : IPaymentProvider
 
     // ---- orders --------------------------------------------------------
 
-    public async Task<ProviderOrder> CreateOrderAsync(CreateOrderRequest request, CancellationToken ct = default)
+    public async Task<ProviderOrder> CreateOrderAsync(
+        MerchantPaymentContext context, CreateOrderRequest request, CancellationToken ct = default)
     {
-        EnsureConfigured();
-
         var minorUnits = ToMinorUnits(request.Amount);
         if (minorUnits <= 0)
             throw new PaymentProviderException("There is nothing left to pay on this invoice.");
@@ -77,8 +76,6 @@ public class RazorpayPaymentProvider : IPaymentProvider
             ["currency"] = request.Currency,
             // Our payment row id, so a Razorpay dashboard entry can be traced back to us.
             ["receipt"] = request.PaymentId.ToString("N"),
-            // Razorpay's own idempotency handle: the same receipt value does not create a
-            // duplicate order when a retried request arrives.
             ["notes"] = new Dictionary<string, string>
             {
                 ["invoiceNumber"] = request.InvoiceNumber,
@@ -86,7 +83,7 @@ public class RazorpayPaymentProvider : IPaymentProvider
             }
         };
 
-        using var response = await SendAsync(HttpMethod.Post, "orders", payload, ct);
+        using var response = await SendAsync(context, HttpMethod.Post, "orders", payload, ct);
         using var document = await ReadJsonAsync(response, "order creation", ct);
         var root = document.RootElement;
 
@@ -99,35 +96,66 @@ public class RazorpayPaymentProvider : IPaymentProvider
             root.TryGetProperty("currency", out var currency) ? currency.GetString() ?? request.Currency : request.Currency);
     }
 
-    public async Task<PaymentOutcome> GetPaymentAsync(string providerPaymentId, CancellationToken ct = default)
+    public async Task<PaymentOutcome> GetPaymentAsync(
+        MerchantPaymentContext context, string providerPaymentId, CancellationToken ct = default)
     {
-        EnsureConfigured();
-
-        using var response = await SendAsync(HttpMethod.Get, $"payments/{Uri.EscapeDataString(providerPaymentId)}", null, ct);
+        using var response = await SendAsync(
+            context, HttpMethod.Get, $"payments/{Uri.EscapeDataString(providerPaymentId)}", null, ct);
         using var document = await ReadJsonAsync(response, "payment lookup", ct);
 
         return MapPayment(document.RootElement);
     }
 
+    /// <summary>
+    /// Asks Razorpay for one payment, purely to find out whether the credentials are accepted. A
+    /// cheap authenticated read is the only honest way to answer "do these work?" — inspecting the
+    /// key's shape would accept a well-formed key that Razorpay has since revoked.
+    /// </summary>
+    public async Task<MerchantAccountProbe> ProbeAsync(
+        MerchantPaymentContext context, CancellationToken ct = default)
+    {
+        using var response = await SendAsync(context, HttpMethod.Get, "payments?count=1", null, ct);
+
+        if (response.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden)
+            throw new PaymentCredentialException(
+                "Razorpay did not accept these credentials. Check the key and secret and try again.");
+
+        using var document = await ReadJsonAsync(response, "credential check", ct);
+
+        // A key pair identifies its account only by the key id itself; Razorpay does not return an
+        // acc_ identifier on this endpoint. OAuth connections already know theirs from the token
+        // exchange, so it is carried through rather than rediscovered.
+        return new MerchantAccountProbe(context.ProviderAccountId, null);
+    }
+
     // ---- signatures ----------------------------------------------------
 
     /// <summary>
-    /// Razorpay signs "{order_id}|{payment_id}" with the key secret. Compared in fixed time so
-    /// the check cannot be probed a byte at a time.
+    /// Razorpay signs "{order_id}|{payment_id}" with the merchant's key secret. Compared in fixed
+    /// time so the check cannot be probed a byte at a time.
+    ///
+    /// Under OAuth we never receive that secret — that is the entire point of OAuth — so there is
+    /// nothing to compute an expected signature from. This reports <see cref="CheckoutVerification.NotVerifiable"/>
+    /// rather than passing or failing, and the caller confirms with Razorpay instead. Returning
+    /// "verified" here would be the single worst lie this codebase could tell.
     /// </summary>
-    public void VerifyCheckoutSignature(CheckoutResult result)
+    public CheckoutVerification VerifyCheckoutSignature(MerchantPaymentContext context, CheckoutResult result)
     {
-        EnsureConfigured();
-
         if (string.IsNullOrWhiteSpace(result.ProviderOrderId) ||
             string.IsNullOrWhiteSpace(result.ProviderPaymentId) ||
             string.IsNullOrWhiteSpace(result.Signature))
             throw new PaymentSignatureException("The payment confirmation was incomplete.");
 
-        var expected = HexHmac($"{result.ProviderOrderId}|{result.ProviderPaymentId}", _options.KeySecret);
+        var secret = context.Credentials.CheckoutSigningSecret;
+        if (string.IsNullOrWhiteSpace(secret))
+            return CheckoutVerification.NotVerifiable;
+
+        var expected = HexHmac($"{result.ProviderOrderId}|{result.ProviderPaymentId}", secret);
 
         if (!FixedTimeEquals(expected, result.Signature))
             throw new PaymentSignatureException("The payment signature did not match.");
+
+        return CheckoutVerification.Verified;
     }
 
     /// <summary>
@@ -135,15 +163,16 @@ public class RazorpayPaymentProvider : IPaymentProvider
     /// changes whitespace and key order and would break every verification, so the caller reads
     /// the body as a string and hands it here untouched.
     /// </summary>
-    public WebhookNotification ParseWebhook(string rawBody, string? signatureHeader, string? eventIdHeader)
+    public WebhookNotification ParseWebhook(
+        string webhookSecret, string rawBody, string? signatureHeader, string? eventIdHeader)
     {
-        if (!_options.WebhooksConfigured)
-            throw new PaymentProviderException("Webhooks are not configured.");
+        if (string.IsNullOrWhiteSpace(webhookSecret))
+            throw new PaymentProviderException("No webhook secret is configured for this account.");
 
         if (string.IsNullOrWhiteSpace(signatureHeader))
             throw new PaymentSignatureException("The webhook signature header was missing.");
 
-        var expected = HexHmac(rawBody, _options.WebhookSecret);
+        var expected = HexHmac(rawBody, webhookSecret);
         if (!FixedTimeEquals(expected, signatureHeader))
             throw new PaymentSignatureException("The webhook signature did not match.");
 
@@ -176,6 +205,12 @@ public class RazorpayPaymentProvider : IPaymentProvider
             {
                 EventId = eventId,
                 EventType = eventType,
+                // Razorpay stamps partner deliveries with the sub-merchant's account. Read for
+                // cross-checking against the connection the delivery was addressed to — never as
+                // the thing that selects which merchant to credit.
+                ProviderAccountId = root.TryGetProperty("account_id", out var account)
+                    ? account.GetString()
+                    : null,
                 Outcome = ExtractOutcome(root, eventType)
             };
         }
@@ -247,16 +282,16 @@ public class RazorpayPaymentProvider : IPaymentProvider
 
     // ---- plumbing ------------------------------------------------------
 
-    private void EnsureConfigured()
-    {
-        if (!_options.IsConfigured)
-            throw new PaymentProviderException("Online payments are not configured for this deployment.");
-    }
-
+    /// <summary>
+    /// Builds one request carrying one merchant's credentials. Both authentication schemes are
+    /// applied to the request message, never to the shared client.
+    /// </summary>
     private async Task<HttpResponseMessage> SendAsync(
-        HttpMethod method, string path, object? body, CancellationToken ct)
+        MerchantPaymentContext context, HttpMethod method, string path, object? body, CancellationToken ct)
     {
         using var request = new HttpRequestMessage(method, path);
+        Authorise(request, context);
+
         if (body is not null)
         {
             request.Content = new StringContent(
@@ -279,6 +314,39 @@ public class RazorpayPaymentProvider : IPaymentProvider
         }
     }
 
+    private static void Authorise(HttpRequestMessage request, MerchantPaymentContext context)
+    {
+        var credentials = context.Credentials;
+
+        switch (credentials.Mode)
+        {
+            case MerchantConnectionMode.KeyPair:
+                if (string.IsNullOrWhiteSpace(credentials.KeySecret))
+                    throw new PaymentCredentialException("This account has no usable Razorpay key secret.");
+
+                request.Headers.Authorization = new AuthenticationHeaderValue("Basic",
+                    Convert.ToBase64String(
+                        Encoding.UTF8.GetBytes($"{credentials.PublicKey}:{credentials.KeySecret}")));
+                break;
+
+            case MerchantConnectionMode.Oauth:
+                if (string.IsNullOrWhiteSpace(credentials.AccessToken))
+                    throw new PaymentCredentialException("This account has no usable Razorpay access token.");
+
+                request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", credentials.AccessToken);
+
+                // Under OAuth the token belongs to the partner application; this header is what
+                // says which sub-merchant's account the call acts on. Without it Razorpay would
+                // apply the call to the partner's own account.
+                if (!string.IsNullOrWhiteSpace(credentials.ProviderAccountId))
+                    request.Headers.Add("X-Razorpay-Account", credentials.ProviderAccountId);
+                break;
+
+            default:
+                throw new PaymentCredentialException("This account's connection type is not supported.");
+        }
+    }
+
     /// <summary>
     /// Razorpay's own error text is logged but never returned: it can name internal accounts and
     /// is not written for customers.
@@ -292,6 +360,13 @@ public class RazorpayPaymentProvider : IPaymentProvider
             _logger.LogWarning(
                 "Razorpay {Operation} returned {Status}: {Body}",
                 operation, (int)response.StatusCode, Truncate(content));
+
+            // A rejected credential is a different problem from a provider hiccup: it is the
+            // merchant's to fix, and the connection should be marked rather than retried.
+            if (response.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden)
+                throw new PaymentCredentialException(
+                    "Razorpay rejected this business's payment credentials. The account needs to be reconnected.");
+
             throw new PaymentProviderException("The payment could not be set up. Please try again.");
         }
 

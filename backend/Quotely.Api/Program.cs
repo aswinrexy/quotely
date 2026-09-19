@@ -12,6 +12,7 @@ using Quotely.Api.Middleware;
 using Quotely.Api.Models;
 using Quotely.Api.Payments;
 using Quotely.Api.Pdf;
+using Quotely.Api.Security;
 using Quotely.Api.Services;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -129,12 +130,27 @@ builder.Services.AddScoped<IPublicInvoiceService, PublicInvoiceService>();
 builder.Services.AddScoped<ICustomerSummaryService, CustomerSummaryService>();
 builder.Services.AddScoped<IPaymentService, PaymentService>();
 builder.Services.AddScoped<IWebhookService, WebhookService>();
+builder.Services.AddScoped<IMerchantConnectionService, MerchantConnectionService>();
 
 // ---- payments ----
-// Credentials come from configuration only (Razorpay__KeyId, Razorpay__KeySecret,
-// Razorpay__WebhookSecret). Nothing is hard-coded and the secrets never leave the server.
+// TWO SEPARATE MONEY FLOWS, and they do not share credentials.
+//
+//   Merchant payments — a customer paying a business that uses Quotely. Collected with THAT
+//   BUSINESS'S own Razorpay credentials, which live encrypted in MerchantPaymentConnection and
+//   are resolved per invoice by IMerchantConnectionService. The provider registered below holds
+//   no credentials of its own.
+//
+//   SaaS billing — a business paying Quotely ₹150/month. Collected with QUOTELY'S credentials
+//   from the Razorpay configuration section. Never used for an invoice payment.
+//
+// See docs/architecture.md, "Three identities".
 builder.Services.Configure<RazorpayOptions>(builder.Configuration.GetSection(RazorpayOptions.SectionName));
-builder.Services.AddHttpClient<IPaymentProvider, RazorpayPaymentProvider>();
+builder.Services.AddHttpClient<IMerchantPaymentProvider, RazorpayMerchantPaymentProvider>();
+builder.Services.AddHttpClient<IRazorpayOauthClient, RazorpayOauthClient>();
+
+// Merchant credentials are encrypted at rest with a key from configuration (Encryption__Key).
+builder.Services.Configure<EncryptionOptions>(builder.Configuration.GetSection(EncryptionOptions.SectionName));
+builder.Services.AddSingleton<ISecretProtector, AesGcmSecretProtector>();
 builder.Services.Configure<PublicLinkOptions>(builder.Configuration.GetSection(PublicLinkOptions.SectionName));
 builder.Services.AddSingleton<IPdfService, PdfService>();
 
@@ -167,6 +183,15 @@ builder.Services.AddCors(options => options.AddPolicy("web", policy => policy
     .WithExposedHeaders("Content-Disposition")));
 
 QuestPDF.Settings.License = LicenseType.Community;
+
+// Production refuses to start when it is misconfigured, rather than starting and being wrong
+// about money. Runs before the app is built so nothing binds a port on a bad configuration.
+ProductionStartupCheck.Validate(
+    builder.Configuration,
+    builder.Environment,
+    builder.Configuration.GetSection(RazorpayOptions.SectionName).Get<RazorpayOptions>() ?? new RazorpayOptions(),
+    builder.Configuration.GetSection(EncryptionOptions.SectionName).Get<EncryptionOptions>() ?? new EncryptionOptions(),
+    corsOrigins);
 
 var app = builder.Build();
 

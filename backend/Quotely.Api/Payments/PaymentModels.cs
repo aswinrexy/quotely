@@ -58,6 +58,16 @@ public record WebhookNotification
 {
     public required string EventId { get; init; }
     public required string EventType { get; init; }
+
+    /// <summary>
+    /// The sub-merchant account the provider says this event belongs to, when it says so.
+    ///
+    /// Used only to CROSS-CHECK the connection the delivery was addressed to. It never selects
+    /// that connection: the payload is unauthenticated until the signature has been verified, and
+    /// the signature can only be verified once a secret — and therefore a connection — has already
+    /// been chosen by other means.
+    /// </summary>
+    public string? ProviderAccountId { get; init; }
     /// <summary>Null for events we recognise but do not act on.</summary>
     public PaymentOutcome? Outcome { get; init; }
 }

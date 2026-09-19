@@ -18,10 +18,20 @@ public class WebhooksController : ControllerBase
 
     public WebhooksController(IWebhookService webhooks) => _webhooks = webhooks;
 
-    [HttpPost("razorpay")]
+    /// <summary>
+    /// A merchant's payment webhook. The route token in the URL is what says which business the
+    /// delivery is for — it is unguessable, specific to one connection, and reissued whenever a
+    /// business disconnects.
+    ///
+    /// Putting it in the path rather than reading the account out of the body is deliberate: the
+    /// body is not authenticated until its signature has been checked, and the signature cannot
+    /// be checked until a secret has been chosen. Choosing that secret from the unverified body
+    /// would be letting the attacker pick the key their forgery is verified against.
+    /// </summary>
+    [HttpPost("razorpay/m/{routeToken}")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
-    public async Task<IActionResult> Razorpay(CancellationToken ct)
+    public async Task<IActionResult> RazorpayMerchant(string routeToken, CancellationToken ct)
     {
         // The body is read as a string and passed through untouched. Razorpay signs the exact
         // bytes it sent, so deserialising and re-serialising first — which reorders keys and
@@ -29,7 +39,8 @@ public class WebhooksController : ControllerBase
         using var reader = new StreamReader(Request.Body);
         var rawBody = await reader.ReadToEndAsync(ct);
 
-        var accepted = await _webhooks.HandleRazorpayAsync(
+        var accepted = await _webhooks.HandleMerchantAsync(
+            routeToken,
             rawBody,
             Request.Headers["X-Razorpay-Signature"].FirstOrDefault(),
             Request.Headers["X-Razorpay-Event-Id"].FirstOrDefault(),

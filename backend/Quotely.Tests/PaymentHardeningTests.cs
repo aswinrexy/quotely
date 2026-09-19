@@ -71,16 +71,28 @@ public class PaymentHardeningTests : IClassFixture<QuotelyApiFactory>
             razorpaySignature = signature ?? FakePaymentProvider.CheckoutSignature(orderId, paymentId)
         });
 
-    private static Task<HttpResponseMessage> WebhookAsync(
-        HttpClient client, string body, string? eventId, string? signature = null)
+    /// <summary>
+    /// Delivers a webhook to <paramref name="owner"/>'s OWN endpoint, signed with its OWN secret.
+    /// There is no shared webhook URL or shared secret any more, so the business being paid has
+    /// to be named explicitly rather than assumed.
+    ///
+    /// The request itself is sent unauthenticated, as Razorpay would send it: the owner client is
+    /// here to identify whose connection is being addressed, not to authorise anything.
+    /// </summary>
+    private Task<HttpResponseMessage> WebhookAsync(
+        HttpClient owner, string body, string? eventId, string? signature = null)
     {
-        var request = new HttpRequestMessage(HttpMethod.Post, "/api/webhooks/razorpay")
+        var connection = _factory.ConnectionFor(owner);
+
+        var request = new HttpRequestMessage(HttpMethod.Post, connection.WebhookUrl)
         {
             Content = new StringContent(body, Encoding.UTF8, "application/json")
         };
-        request.Headers.Add("X-Razorpay-Signature", signature ?? FakePaymentProvider.WebhookSignature(body));
+        request.Headers.Add(
+            "X-Razorpay-Signature",
+            signature ?? FakePaymentProvider.WebhookSignature(body, connection.WebhookSecret));
         if (eventId is not null) request.Headers.Add("X-Razorpay-Event-Id", eventId);
-        return client.SendAsync(request);
+        return _factory.CreateClient().SendAsync(request);
     }
 
     private Task<InvoicePaymentsDto?> SummaryAsync(HttpClient owner, Guid invoiceId) =>
@@ -198,10 +210,10 @@ public class PaymentHardeningTests : IClassFixture<QuotelyApiFactory>
 
         // Two captures land on the same order — a provider-side condition our flow cannot cause,
         // but which must not corrupt the ledger if it happens.
-        await WebhookAsync(anonymous,
+        await WebhookAsync(owner,
             FakePaymentProvider.WebhookBody("payment.captured", "pay_ex_1", order.OrderId, "captured", 1000000),
             "evt_ex_1");
-        await WebhookAsync(anonymous,
+        await WebhookAsync(owner,
             FakePaymentProvider.WebhookBody("payment.captured", "pay_ex_2", order.OrderId, "captured", 1000000),
             "evt_ex_2");
 
@@ -247,8 +259,8 @@ public class PaymentHardeningTests : IClassFixture<QuotelyApiFactory>
     {
         var (owner, invoice, token, anonymous, order) = await ReadyToPayAsync();
 
-        await WebhookAsync(anonymous, Captured("pay_c_then_o", order.OrderId, order.Amount), "evt_c1");
-        await WebhookAsync(anonymous, OrderPaid("pay_c_then_o", order.OrderId, order.Amount), "evt_o1");
+        await WebhookAsync(owner, Captured("pay_c_then_o", order.OrderId, order.Amount), "evt_c1");
+        await WebhookAsync(owner, OrderPaid("pay_c_then_o", order.OrderId, order.Amount), "evt_o1");
 
         await AssertSinglePaymentAsync(owner, invoice.Id);
     }
@@ -260,8 +272,8 @@ public class PaymentHardeningTests : IClassFixture<QuotelyApiFactory>
 
         // order.paid arriving first is safe because its payload names the actual payment, so the
         // unique ProviderPaymentId still collapses the pair onto one record.
-        await WebhookAsync(anonymous, OrderPaid("pay_o_then_c", order.OrderId, order.Amount), "evt_o2");
-        await WebhookAsync(anonymous, Captured("pay_o_then_c", order.OrderId, order.Amount), "evt_c2");
+        await WebhookAsync(owner, OrderPaid("pay_o_then_c", order.OrderId, order.Amount), "evt_o2");
+        await WebhookAsync(owner, Captured("pay_o_then_c", order.OrderId, order.Amount), "evt_c2");
 
         await AssertSinglePaymentAsync(owner, invoice.Id);
     }
@@ -273,9 +285,9 @@ public class PaymentHardeningTests : IClassFixture<QuotelyApiFactory>
 
         // Same event id — the provider redelivering — and then a different event id carrying the
         // same payment, which the payment-id constraint catches instead.
-        await WebhookAsync(anonymous, OrderPaid("pay_dup_o", order.OrderId, order.Amount), "evt_o3");
-        await WebhookAsync(anonymous, OrderPaid("pay_dup_o", order.OrderId, order.Amount), "evt_o3");
-        await WebhookAsync(anonymous, OrderPaid("pay_dup_o", order.OrderId, order.Amount), "evt_o3_again");
+        await WebhookAsync(owner, OrderPaid("pay_dup_o", order.OrderId, order.Amount), "evt_o3");
+        await WebhookAsync(owner, OrderPaid("pay_dup_o", order.OrderId, order.Amount), "evt_o3");
+        await WebhookAsync(owner, OrderPaid("pay_dup_o", order.OrderId, order.Amount), "evt_o3_again");
 
         await AssertSinglePaymentAsync(owner, invoice.Id);
     }
@@ -285,9 +297,9 @@ public class PaymentHardeningTests : IClassFixture<QuotelyApiFactory>
     {
         var (owner, invoice, token, anonymous, order) = await ReadyToPayAsync();
 
-        await WebhookAsync(anonymous, Captured("pay_dup_c", order.OrderId, order.Amount), "evt_c3");
-        await WebhookAsync(anonymous, Captured("pay_dup_c", order.OrderId, order.Amount), "evt_c3");
-        await WebhookAsync(anonymous, Captured("pay_dup_c", order.OrderId, order.Amount), "evt_c3_again");
+        await WebhookAsync(owner, Captured("pay_dup_c", order.OrderId, order.Amount), "evt_c3");
+        await WebhookAsync(owner, Captured("pay_dup_c", order.OrderId, order.Amount), "evt_c3");
+        await WebhookAsync(owner, Captured("pay_dup_c", order.OrderId, order.Amount), "evt_c3_again");
 
         await AssertSinglePaymentAsync(owner, invoice.Id);
     }
@@ -302,7 +314,7 @@ public class PaymentHardeningTests : IClassFixture<QuotelyApiFactory>
         var body = "{\"event\":\"order.paid\",\"payload\":{\"order\":{\"entity\":{\"id\":\"" +
                    order.OrderId + "\",\"status\":\"paid\",\"amount\":" + order.Amount + "}}}}";
 
-        (await WebhookAsync(anonymous, body, "evt_order_only")).StatusCode.Should().Be(HttpStatusCode.OK);
+        (await WebhookAsync(owner, body, "evt_order_only")).StatusCode.Should().Be(HttpStatusCode.OK);
 
         var summary = (await SummaryAsync(owner, invoice.Id))!;
         summary.Summary.Paid.Should().Be(0m);
@@ -339,13 +351,13 @@ public class PaymentHardeningTests : IClassFixture<QuotelyApiFactory>
     {
         var (owner, invoice, _, anonymous, order) = await ReadyToPayAsync();
 
-        await WebhookAsync(anonymous, Captured("pay_sm", order.OrderId, order.Amount), "evt_sm_1");
+        await WebhookAsync(owner, Captured("pay_sm", order.OrderId, order.Amount), "evt_sm_1");
 
         // Both demotions arrive late, as Razorpay's unordered delivery permits.
-        await WebhookAsync(anonymous,
+        await WebhookAsync(owner,
             FakePaymentProvider.WebhookBody("payment.authorized", "pay_sm", order.OrderId, "authorized", order.Amount),
             "evt_sm_2");
-        await WebhookAsync(anonymous,
+        await WebhookAsync(owner,
             FakePaymentProvider.WebhookBody("payment.failed", "pay_sm", order.OrderId, "failed", order.Amount),
             "evt_sm_3");
 
@@ -361,13 +373,13 @@ public class PaymentHardeningTests : IClassFixture<QuotelyApiFactory>
         // The legitimate forward transition: same payment id, failed then captured.
         var (owner, invoice, _, anonymous, order) = await ReadyToPayAsync();
 
-        await WebhookAsync(anonymous,
+        await WebhookAsync(owner,
             FakePaymentProvider.WebhookBody("payment.failed", "pay_recover", order.OrderId, "failed", order.Amount),
             "evt_rec_1");
 
         (await SummaryAsync(owner, invoice.Id))!.Summary.Paid.Should().Be(0m);
 
-        await WebhookAsync(anonymous, Captured("pay_recover", order.OrderId, order.Amount), "evt_rec_2");
+        await WebhookAsync(owner, Captured("pay_recover", order.OrderId, order.Amount), "evt_rec_2");
 
         var summary = (await SummaryAsync(owner, invoice.Id))!;
         summary.Payments.Single().Status.Should().Be("Captured");
@@ -380,7 +392,7 @@ public class PaymentHardeningTests : IClassFixture<QuotelyApiFactory>
     {
         var (owner, invoice, _, anonymous, order) = await ReadyToPayAsync();
 
-        await WebhookAsync(anonymous,
+        await WebhookAsync(owner,
             FakePaymentProvider.WebhookBody("payment.authorized", "pay_prog", order.OrderId, "authorized", order.Amount),
             "evt_prog_1");
 
@@ -388,7 +400,7 @@ public class PaymentHardeningTests : IClassFixture<QuotelyApiFactory>
         held.Paid.Should().Be(0m, "authorised money is not captured money");
         held.HasPendingPayment.Should().BeTrue();
 
-        await WebhookAsync(anonymous, Captured("pay_prog", order.OrderId, order.Amount), "evt_prog_2");
+        await WebhookAsync(owner, Captured("pay_prog", order.OrderId, order.Amount), "evt_prog_2");
 
         var settled = (await SummaryAsync(owner, invoice.Id))!.Summary;
         settled.Paid.Should().Be(10000m);
@@ -523,7 +535,7 @@ public class PaymentHardeningTests : IClassFixture<QuotelyApiFactory>
         var anonymous = _factory.CreateClient();
         var order = await OrderAsync(anonymous, token);
 
-        await WebhookAsync(anonymous, Captured("pay_bound", order.OrderId, order.Amount), "evt_bound");
+        await WebhookAsync(owner, Captured("pay_bound", order.OrderId, order.Amount), "evt_bound");
 
         // The payment lands on the invoice whose order it names, and only that one.
         (await SummaryAsync(owner, paying.Id))!.Summary.Paid.Should().Be(10000m);
@@ -549,13 +561,13 @@ public class PaymentHardeningTests : IClassFixture<QuotelyApiFactory>
             await (await anonymous.GetAsync("/api/public/invoices/there-is-no-such-token-here-abc")).Content.ReadAsStringAsync(),
             await (await VerifyAsync(anonymous, token, order.OrderId, "pay_x", "forged")).Content.ReadAsStringAsync(),
             await (await VerifyAsync(anonymous, token, "order_not_ours", "pay_y")).Content.ReadAsStringAsync(),
-            await (await WebhookAsync(anonymous, "{\"event\":\"payment.captured\"}", "evt_leak", "bad")).Content.ReadAsStringAsync(),
+            await (await WebhookAsync(owner, "{\"event\":\"payment.captured\"}", "evt_leak", "bad")).Content.ReadAsStringAsync(),
         };
 
         foreach (var body in bodies)
         {
             body.Should().NotContain(FakePaymentProvider.TestKeySecret);
-            body.Should().NotContain(FakePaymentProvider.TestWebhookSecret);
+            body.Should().NotContain(_factory.ConnectionFor(owner).WebhookSecret);
             body.Should().NotContain(invoice.Id.ToString());
             body.Should().NotContain("Exception").And.NotContain("   at ");
             body.Should().NotContain("SQLite").And.NotContain("SELECT ");
