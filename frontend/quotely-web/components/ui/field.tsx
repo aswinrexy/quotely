@@ -1,8 +1,9 @@
 "use client";
 
-import { Children, cloneElement, isValidElement } from "react";
+import { Children, cloneElement, isValidElement, useId, useState } from "react";
 import { cn } from "@/lib/cn";
 import { Icon } from "@/components/ui/icons";
+import type { FieldCheck } from "@/lib/validation";
 
 /**
  * Inputs carry a near-black border rather than the usual hairline — the signature of the
@@ -13,6 +14,54 @@ export const inputClass =
   "transition-colors duration-150 ease-out placeholder:text-fog " +
   "disabled:border-ash disabled:bg-paper disabled:text-fog";
 
+/**
+ * A password field with a reveal toggle.
+ *
+ * People mistype passwords, and on a phone they mistype them constantly. Letting someone look at
+ * what they have typed is the single cheapest way to cut failed sign-ins — and it is their own
+ * screen, which they are better placed to judge than we are.
+ *
+ * It is a <button type="button"> on purpose: inside a form, a bare <button> submits.
+ */
+export function PasswordInput({
+  className,
+  id,
+  ...props
+}: Omit<React.InputHTMLAttributes<HTMLInputElement>, "type">) {
+  const [visible, setVisible] = useState(false);
+  const generatedId = useId();
+  const inputId = id ?? generatedId;
+
+  return (
+    <div className="relative">
+      <input
+        {...props}
+        id={inputId}
+        type={visible ? "text" : "password"}
+        // Room for the toggle, and for the tick when the field sits inside a Field.
+        className={cn(inputClass, "pr-20", className)}
+      />
+      <button
+        type="button"
+        onClick={() => setVisible((shown) => !shown)}
+        // Reachable, but after the field itself — someone tabbing through a form is heading for
+        // the submit button, not for this.
+        tabIndex={-1}
+        aria-controls={inputId}
+        aria-pressed={visible}
+        aria-label={visible ? "Hide password" : "Show password"}
+        title={visible ? "Hide password" : "Show password"}
+        className={cn(
+          "absolute right-2 top-1/2 -translate-y-1/2 rounded-btn p-1.5",
+          "text-fog transition-colors duration-150 ease-out hover:bg-paper hover:text-charcoal",
+        )}
+      >
+        {visible ? <Icon.eyeOff className="h-4 w-4" /> : <Icon.eye className="h-4 w-4" />}
+      </button>
+    </div>
+  );
+}
+
 interface FieldProps {
   label: string;
   htmlFor?: string;
@@ -20,21 +69,49 @@ interface FieldProps {
   hint?: string;
   required?: boolean;
   className?: string;
+  /**
+   * The result of a validator, when the field has one. Drives the green tick and — once the
+   * field has been touched — the error message, so a form does not have to wire both by hand.
+   *
+   * <see cref="error"/> still wins when it is set: a message from the server is about something
+   * the browser could not have known, and must not be overwritten by a local rule that passes.
+   */
+  check?: FieldCheck;
+  /**
+   * Whether the person has finished with this field. The tick and the error both wait for it.
+   * Marking a field wrong while someone is still typing the third letter of their email is the
+   * most common way validation makes a form feel hostile.
+   */
+  touched?: boolean;
   children: React.ReactNode;
 }
 
-export function Field({ label, htmlFor, error, hint, required, className, children }: FieldProps) {
-  const describedBy = htmlFor ? (error ? `${htmlFor}-error` : hint ? `${htmlFor}-hint` : undefined) : undefined;
+export function Field({ label, htmlFor, error, hint, required, className, check, touched, children }: FieldProps) {
+  // A local rule only speaks once the field has been left alone.
+  const localError = touched && check?.state === "invalid" ? check.error : null;
+  const shownError = error ?? localError;
+
+  // The tick means "this is well-formed", not "this is correct" — only the server can say that.
+  const showTick = check?.state === "valid" && (touched ?? true);
+
+  const describedBy = htmlFor ? (shownError ? `${htmlFor}-error` : hint ? `${htmlFor}-hint` : undefined) : undefined;
+
+  // A PasswordInput puts its own reveal toggle against the trailing edge, so the tick has to
+  // stand off far enough to clear it — otherwise the two render on top of each other, which is
+  // exactly what happened the first time this was built.
+  const hasTrailingControl = Children.toArray(children).some(
+    (child) => isValidElement(child) && child.type === PasswordInput,
+  );
 
   // The hint or error is wired onto the control itself, so a screen reader announces it with the
   // field rather than leaving it as loose text nearby.
   const control =
-    describedBy || error
+    describedBy || shownError
       ? Children.map(children, (child) =>
           isValidElement<{ "aria-describedby"?: string; "aria-invalid"?: boolean }>(child)
             ? cloneElement(child, {
                 "aria-describedby": child.props["aria-describedby"] ?? describedBy,
-                "aria-invalid": error ? true : child.props["aria-invalid"],
+                "aria-invalid": shownError ? true : child.props["aria-invalid"],
               })
             : child,
         )
@@ -51,20 +128,39 @@ export function Field({ label, htmlFor, error, hint, required, className, childr
         )}
         {required && <span className="sr-only"> (required)</span>}
       </label>
-      {control}
-      {hint && !error && (
+      {/*
+        The tick sits inside the field's trailing edge rather than beside the label, so a column
+        of fields reads as a column of ticks as it is filled in. aria-hidden because the state is
+        already announced through aria-invalid and the error text — a screen reader does not need
+        to be told twice, in a decorative way.
+      */}
+      <div className="relative">
+        {control}
+        {showTick && (
+          <span
+            aria-hidden
+            className={cn(
+              "pointer-events-none absolute top-1/2 -translate-y-1/2 text-mint-ink",
+              hasTrailingControl ? "right-10" : "right-3",
+            )}
+          >
+            <Icon.check className="h-4 w-4" />
+          </span>
+        )}
+      </div>
+      {hint && !shownError && (
         <p id={htmlFor ? `${htmlFor}-hint` : undefined} className="text-caption text-fog">
           {hint}
         </p>
       )}
-      {error && (
+      {shownError && (
         <p
           id={htmlFor ? `${htmlFor}-error` : undefined}
           role="alert"
           className="flex items-center gap-1 text-caption text-rose-ink"
         >
           <Icon.alert className="h-3.5 w-3.5 shrink-0" />
-          {error}
+          {shownError}
         </p>
       )}
     </div>

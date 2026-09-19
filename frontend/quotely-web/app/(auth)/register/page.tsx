@@ -5,7 +5,8 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth";
 import { Button } from "@/components/ui/button";
-import { Field, Input } from "@/components/ui/field";
+import { Field, Input, PasswordInput } from "@/components/ui/field";
+import { allValid, checkEmail, checkPassword, checkRequired } from "@/lib/validation";
 
 export default function RegisterPage() {
   const { register } = useAuth();
@@ -13,17 +14,33 @@ export default function RegisterPage() {
   const [form, setForm] = useState({ fullName: "", businessName: "", email: "", password: "" });
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [touched, setTouched] = useState<Record<string, boolean>>({});
+
+  const checks = {
+    fullName: checkRequired(form.fullName, "Your name"),
+    email: checkEmail(form.email),
+    password: checkPassword(form.password),
+  };
+
+  // Every required field well-formed. The button stays enabled regardless — disabling it leaves
+  // someone staring at a form with no idea what is wrong — but this decides whether to submit.
+  const ready = allValid(checks.fullName, checks.email, checks.password);
 
   function update(key: keyof typeof form, value: string) {
     setForm((current) => ({ ...current, [key]: value }));
+  }
+
+  function touch(key: string) {
+    setTouched((current) => ({ ...current, [key]: true }));
   }
 
   async function onSubmit(event: React.FormEvent) {
     event.preventDefault();
     setError(null);
 
-    if (form.password.length < 8) {
-      setError("Password must be at least 8 characters.");
+    if (!ready) {
+      // Reveal every message at once rather than one per attempt.
+      setTouched({ fullName: true, email: true, password: true });
       return;
     }
 
@@ -49,26 +66,33 @@ export default function RegisterPage() {
       <p className="mt-1 text-body text-fog">Start sending professional quotations today.</p>
 
       <form onSubmit={onSubmit} className="mt-6 space-y-4" noValidate>
-        <Field label="Your name" htmlFor="fullName" required>
+        <Field
+          label="Your name"
+          htmlFor="fullName"
+          required
+          check={checks.fullName}
+          touched={touched.fullName}
+        >
           <Input
             id="fullName"
+            autoComplete="name"
             required
             value={form.fullName}
             onChange={(e) => update("fullName", e.target.value)}
-            placeholder="Ravi Kumar"
+            onBlur={() => touch("fullName")}
           />
         </Field>
 
         <Field label="Business name" htmlFor="businessName" hint="You can change this later in Business Profile.">
           <Input
             id="businessName"
+            autoComplete="organization"
             value={form.businessName}
             onChange={(e) => update("businessName", e.target.value)}
-            placeholder="ABC Electricals"
           />
         </Field>
 
-        <Field label="Email" htmlFor="email" required>
+        <Field label="Email" htmlFor="email" required check={checks.email} touched={touched.email}>
           <Input
             id="email"
             type="email"
@@ -76,20 +100,26 @@ export default function RegisterPage() {
             required
             value={form.email}
             onChange={(e) => update("email", e.target.value)}
-            placeholder="you@business.com"
+            onBlur={() => touch("email")}
           />
         </Field>
 
-        <Field label="Password" htmlFor="password" required hint="At least 8 characters.">
-          <Input
+        <Field
+          label="Password"
+          htmlFor="password"
+          required
+          hint="At least 8 characters."
+          check={checks.password}
+          touched={touched.password}
+        >
+          <PasswordInput
             id="password"
-            type="password"
             autoComplete="new-password"
             required
             minLength={8}
             value={form.password}
             onChange={(e) => update("password", e.target.value)}
-            placeholder="••••••••"
+            onBlur={() => touch("password")}
           />
         </Field>
 
