@@ -295,6 +295,99 @@ namespace Quotely.Migrations.PostgreSql.Migrations
                     b.ToTable("BusinessProfiles");
                 });
 
+            modelBuilder.Entity("Quotely.Api.Models.Coupon", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Code")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("character varying(40)");
+
+                    b.Property<Guid>("ConcurrencyStamp")
+                        .IsConcurrencyToken()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Description")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<DateTime?>("ExpiresAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("FreeMonths")
+                        .HasColumnType("integer");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("boolean");
+
+                    b.Property<int?>("MaxRedemptions")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("RedemptionCount")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Code")
+                        .IsUnique();
+
+                    b.ToTable("Coupons");
+                });
+
+            modelBuilder.Entity("Quotely.Api.Models.CouponRedemption", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("CodeUsed")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("character varying(40)");
+
+                    b.Property<Guid>("CouponId")
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("FreeMonthsGranted")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime>("RedeemedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("SubscriptionId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("TrialEndAfter")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime?>("TrialEndBefore")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("SubscriptionId");
+
+                    b.HasIndex("UserId");
+
+                    b.HasIndex("CouponId", "UserId")
+                        .IsUnique();
+
+                    b.ToTable("CouponRedemptions");
+                });
+
             modelBuilder.Entity("Quotely.Api.Models.Customer", b =>
                 {
                     b.Property<Guid>("Id")
@@ -972,6 +1065,96 @@ namespace Quotely.Migrations.PostgreSql.Migrations
                     b.ToTable("QuotationItems");
                 });
 
+            modelBuilder.Entity("Quotely.Api.Models.Subscription", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("CancelRequestedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime?>("CancelledAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("ConcurrencyStamp")
+                        .IsConcurrencyToken()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Currency")
+                        .IsRequired()
+                        .HasMaxLength(3)
+                        .HasColumnType("character varying(3)");
+
+                    b.Property<DateTime?>("CurrentPeriodEnd")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime?>("CurrentPeriodStart")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime?>("LastPaymentAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime?>("LastPaymentFailedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("PlanCode")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("character varying(40)");
+
+                    b.Property<decimal>("Price")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("numeric(18,2)");
+
+                    b.Property<string>("Provider")
+                        .IsRequired()
+                        .HasMaxLength(30)
+                        .HasColumnType("character varying(30)");
+
+                    b.Property<string>("ProviderPlanId")
+                        .HasMaxLength(80)
+                        .HasColumnType("character varying(80)");
+
+                    b.Property<string>("ProviderSubscriptionId")
+                        .HasMaxLength(80)
+                        .HasColumnType("character varying(80)");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("StatusMessage")
+                        .HasMaxLength(300)
+                        .HasColumnType("character varying(300)");
+
+                    b.Property<DateTime?>("TrialEnd")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime?>("TrialStart")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ProviderSubscriptionId")
+                        .IsUnique();
+
+                    b.HasIndex("UserId")
+                        .IsUnique();
+
+                    b.HasIndex("Status", "TrialEnd");
+
+                    b.ToTable("Subscriptions");
+                });
+
             modelBuilder.Entity("Quotely.Api.Models.WebhookEvent", b =>
                 {
                     b.Property<Guid>("Id")
@@ -1081,6 +1264,33 @@ namespace Quotely.Migrations.PostgreSql.Migrations
                         .HasForeignKey("Quotely.Api.Models.BusinessProfile", "UserId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
+
+                    b.Navigation("User");
+                });
+
+            modelBuilder.Entity("Quotely.Api.Models.CouponRedemption", b =>
+                {
+                    b.HasOne("Quotely.Api.Models.Coupon", "Coupon")
+                        .WithMany("Redemptions")
+                        .HasForeignKey("CouponId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("Quotely.Api.Models.Subscription", "Subscription")
+                        .WithMany("Redemptions")
+                        .HasForeignKey("SubscriptionId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("Quotely.Api.Models.AppUser", "User")
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.NoAction)
+                        .IsRequired();
+
+                    b.Navigation("Coupon");
+
+                    b.Navigation("Subscription");
 
                     b.Navigation("User");
                 });
@@ -1209,6 +1419,17 @@ namespace Quotely.Migrations.PostgreSql.Migrations
                     b.Navigation("Quotation");
                 });
 
+            modelBuilder.Entity("Quotely.Api.Models.Subscription", b =>
+                {
+                    b.HasOne("Quotely.Api.Models.AppUser", "User")
+                        .WithOne()
+                        .HasForeignKey("Quotely.Api.Models.Subscription", "UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("User");
+                });
+
             modelBuilder.Entity("Quotely.Api.Models.AppUser", b =>
                 {
                     b.Navigation("BusinessProfile");
@@ -1222,6 +1443,11 @@ namespace Quotely.Migrations.PostgreSql.Migrations
                     b.Navigation("Products");
 
                     b.Navigation("Quotations");
+                });
+
+            modelBuilder.Entity("Quotely.Api.Models.Coupon", b =>
+                {
+                    b.Navigation("Redemptions");
                 });
 
             modelBuilder.Entity("Quotely.Api.Models.Customer", b =>
@@ -1243,6 +1469,11 @@ namespace Quotely.Migrations.PostgreSql.Migrations
                     b.Navigation("Invoice");
 
                     b.Navigation("Items");
+                });
+
+            modelBuilder.Entity("Quotely.Api.Models.Subscription", b =>
+                {
+                    b.Navigation("Redemptions");
                 });
 #pragma warning restore 612, 618
         }

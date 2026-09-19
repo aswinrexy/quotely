@@ -10,6 +10,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Quotely.Api.Billing;
 using Quotely.Api.Data;
 using Quotely.Api.DTOs;
 using Quotely.Api.Payments;
@@ -22,7 +23,31 @@ namespace Quotely.Tests;
 /// </summary>
 public class QuotelyApiFactory : WebApplicationFactory<Program>, IAsyncLifetime
 {
-    private readonly SqliteConnection _connection = new("DataSource=:memory:");
+    /// <summary>
+    /// A private SQLite database in a temporary file, not <c>:memory:</c>.
+    ///
+    /// An in-memory database lives inside one connection, so every request in the suite shared a
+    /// single one — and a single connection cannot have two transactions open at once. That made
+    /// genuine concurrency untestable: four simultaneous requests failed with "cannot start a
+    /// transaction within a transaction" rather than racing the way they would in production.
+    ///
+    /// A file lets each request open its own connection, exactly as a deployment does, so the
+    /// concurrency tests exercise real database locking and real unique-index collisions. The
+    /// file is private to one test class and deleted afterwards.
+    /// </summary>
+    private readonly string _databasePath =
+        Path.Combine(Path.GetTempPath(), $"quotely-tests-{Guid.NewGuid():N}.db");
+
+    private string ConnectionString =>
+        new SqliteConnectionStringBuilder
+        {
+            DataSource = _databasePath,
+            Pooling = true,
+            // Seconds to wait for a writer's lock before giving up. Concurrent writers are the
+            // point of several tests; without this they would fail as "database is locked"
+            // instead of queueing the way a real one does.
+            DefaultTimeout = 30
+        }.ToString();
 
     /// <summary>
     /// The stand-in payment provider. Tests arrange outcomes on it; nothing in the suite ever
@@ -40,13 +65,13 @@ public class QuotelyApiFactory : WebApplicationFactory<Program>, IAsyncLifetime
             ["Database:AutoMigrate"] = "false",
             ["Seed:Enabled"] = "false",
             ["Jwt:Key"] = "integration-test-signing-key-at-least-32-chars",
-            ["ConnectionStrings:DefaultConnection"] = "DataSource=:memory:",
+            ["ConnectionStrings:DefaultConnection"] = ConnectionString,
             // Quotely's OWN billing account. Placeholders only: the fake provider below
             // replaces the real adapter entirely, and merchant payments do not read these at all.
             ["Razorpay:Mode"] = "Test",
             ["Razorpay:KeyId"] = "rzp_test_quotely_platform",
             ["Razorpay:KeySecret"] = "platform_key_secret_for_tests",
-            ["Razorpay:WebhookSecret"] = "platform_webhook_secret_for_tests",
+            ["Razorpay:WebhookSecret"] = PlatformWebhookSecret,
             // A real 32-byte key, so merchant credentials are genuinely encrypted in the suite
             // rather than the encryption being stubbed out. Test-only, and not a secret: it
             // protects nothing but throwaway fake keys in an in-memory database.
@@ -57,7 +82,7 @@ public class QuotelyApiFactory : WebApplicationFactory<Program>, IAsyncLifetime
         {
             services.RemoveAll(typeof(DbContextOptions<AppDbContext>));
             services.RemoveAll(typeof(AppDbContext));
-            services.AddDbContext<AppDbContext>(options => options.UseSqlite(_connection));
+            services.AddDbContext<AppDbContext>(options => options.UseSqlite(ConnectionString));
 
             services.RemoveAll(typeof(IMerchantPaymentProvider));
             services.AddSingleton<IMerchantPaymentProvider>(Payments);
@@ -66,16 +91,39 @@ public class QuotelyApiFactory : WebApplicationFactory<Program>, IAsyncLifetime
 
     public async Task InitializeAsync()
     {
-        await _connection.OpenAsync();
+        using (var connection = new SqliteConnection(ConnectionString))
+        {
+            await connection.OpenAsync();
+            // Write-ahead logging, so a reader is not blocked by the writer. Without it the
+            // concurrency tests spend their time queueing behind each other rather than racing.
+            await using var pragma = connection.CreateCommand();
+            pragma.CommandText = "PRAGMA journal_mode=WAL;";
+            await pragma.ExecuteNonQueryAsync();
+        }
+
         using var scope = Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
         await db.Database.EnsureCreatedAsync();
+
+        // The application seeds its coupons on start-up, which for this factory happens before
+        // the schema above exists. Seeding here instead gives the suite the same coupons a real
+        // deployment has, rather than a database where QUOTELY6 does not exist.
+        await CouponSeeder.SeedAsync(Services);
     }
 
     public new async Task DisposeAsync()
     {
-        await _connection.DisposeAsync();
         await base.DisposeAsync();
+
+        // Pooled connections keep the file open, so they have to be released before it can go.
+        SqliteConnection.ClearAllPools();
+
+        foreach (var path in new[] { _databasePath, _databasePath + "-wal", _databasePath + "-shm" })
+        {
+            // A leftover temp file is not worth failing a test run over.
+            try { if (File.Exists(path)) File.Delete(path); }
+            catch (IOException) { }
+        }
     }
 
     /// <summary>
@@ -121,6 +169,13 @@ public class QuotelyApiFactory : WebApplicationFactory<Program>, IAsyncLifetime
     /// the whole point — so a test that wants to impersonate one business at another's endpoint
     /// has to mix these up deliberately rather than by accident.
     /// </summary>
+    /// <summary>
+    /// QUOTELY'S OWN webhook secret — the one that verifies subscription billing events. Kept
+    /// distinct from every merchant secret in the suite, because proving the two cannot be
+    /// substituted for each other is one of the things the tests are for.
+    /// </summary>
+    public const string PlatformWebhookSecret = "quotely_platform_webhook_secret_for_tests";
+
     public sealed record MerchantTestConnection(string WebhookUrl, string WebhookSecret, string KeySecret);
 
     /// <summary>
