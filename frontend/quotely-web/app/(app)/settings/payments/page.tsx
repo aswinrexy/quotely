@@ -90,7 +90,7 @@ export default function PaymentsSettingsPage() {
         <StatusCard connection={connection} />
 
         {freshSecret && connection.webhookUrl && (
-          <WebhookSetupCard url={connection.webhookUrl} secret={freshSecret} mode={connection.mode} />
+          <WebhookSetupCard url={connection.webhookUrl} secret={freshSecret} />
         )}
 
         {!connected && <ConnectCard connection={connection} onConnected={onConnected} />}
@@ -410,23 +410,25 @@ function KeyPairForm({ onConnected }: { onConnected: (result: MerchantConnection
 // ---- webhook setup ---------------------------------------------------------
 
 /**
- * Shown once, immediately after connecting with API keys.
+ * Shown once, immediately after connecting.
  *
- * Razorpay tells Quotely about a payment by calling back, and it will only do that if the
- * merchant registers this address and secret in their own dashboard. Under OAuth we register it
- * for them, so this is only ever needed for the key-pair route.
+ * Razorpay tells Quotely about a payment by calling back, and it will only do that if this
+ * address and secret are registered against the account.
+ *
+ * This is shown for BOTH connection modes, including OAuth. Registering the webhook
+ * automatically on the merchant's behalf needs Razorpay's partner webhook API, which cannot be
+ * implemented against the current documentation without guessing — see docs/razorpay-partner.md.
+ * Until that is resolved, an OAuth merchant must add the webhook themselves exactly as a
+ * key-pair merchant does. Hiding this card for them would leave them with no webhook at all and
+ * no indication that anything was missing, which is the worse failure by some distance.
  */
 function WebhookSetupCard({
   url,
   secret,
-  mode,
 }: {
   url: string;
   secret: string;
-  mode?: MerchantConnection["mode"] | null;
 }) {
-  if (mode === "Oauth") return null;
-
   const absolute = `${apiOrigin()}${url}`;
 
   return (

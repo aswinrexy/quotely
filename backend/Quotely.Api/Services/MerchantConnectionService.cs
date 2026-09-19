@@ -302,7 +302,22 @@ public class MerchantConnectionService : IMerchantConnectionService
         connection.WebhookSecretCipher = _protector.Protect(webhookSecret);
 
         MarkConnected(connection);
-        await _db.SaveChangesAsync(ct);
+
+        try
+        {
+            await _db.SaveChangesAsync(ct);
+        }
+        catch (DbUpdateException)
+        {
+            // Two connect requests for the same business arrived together and the unique index on
+            // (UserId, Provider) settled it. A 409 rather than a 500: nothing is wrong, one of the
+            // two simply lost, and the winner's connection is the one that stands.
+            _db.ChangeTracker.Clear();
+            _logger.LogInformation(
+                "A concurrent Razorpay connection for merchant {UserId} was already saved", userId);
+            throw ApiException.Conflict(
+                "This account was connected by another request. Reload the page to see it.");
+        }
 
         _logger.LogInformation(
             "Merchant {UserId} connected a Razorpay account in {Environment} mode via key pair",
@@ -394,8 +409,17 @@ public class MerchantConnectionService : IMerchantConnectionService
         connection.ProviderAccountId = tokens.RazorpayAccountId;
         connection.KeySecretCipher = null;
 
-        // Under OAuth we create the webhook at Razorpay ourselves and choose its secret, so the
-        // merchant never has to configure anything.
+        // The secret this connection's webhooks must be signed with.
+        //
+        // The intention is that Quotely registers the webhook at Razorpay on the merchant's
+        // behalf, via the partner webhook API, so an OAuth merchant configures nothing. That call
+        // is NOT made: the current documentation conflicts on the authorization scheme for it and
+        // does not confirm that order.paid is an accepted event, and it cannot be exercised
+        // without approved partner credentials. Implementing it on a guess would mean shipping a
+        // webhook registration that silently fails.
+        //
+        // So until then the secret is handed to the merchant exactly as in key-pair mode and they
+        // register the webhook themselves. See docs/razorpay-partner.md, "Two things still to do".
         var webhookSecret = PublicTokenGenerator.CreateToken();
         connection.WebhookSecretCipher = _protector.Protect(webhookSecret);
 
