@@ -7,7 +7,19 @@ import { useToast } from "@/components/ui/toast";
 import { Button } from "@/components/ui/button";
 import { Card, SectionCard } from "@/components/ui/card";
 import { Field, Input, Select } from "@/components/ui/field";
-import { checkEmail, checkPhone, checkRequired, checkTaxNumber } from "@/lib/validation";
+import {
+  MOBILE_DIGITS,
+  POSTAL_CODE_MAX,
+  alphanumericOnly,
+  checkCountry,
+  checkEmail,
+  checkMobile,
+  checkPostalCode,
+  checkRequired,
+  checkTaxNumber,
+  digitsOnly,
+  lettersOnly,
+} from "@/lib/validation";
 import { DetailSkeleton, ErrorState } from "@/components/ui/states";
 import { PageHeader } from "@/components/app/page-header";
 import type { BusinessProfile } from "@/types";
@@ -41,8 +53,10 @@ export default function BusinessProfilePage() {
   const checks = {
     businessName: checkRequired(form.businessName, "A business name"),
     businessEmail: checkEmail(form.businessEmail ?? "", false),
-    phone: checkPhone(form.phone ?? ""),
+    phone: checkMobile(form.phone ?? ""),
     taxNumber: checkTaxNumber(form.taxNumber ?? ""),
+    postalCode: checkPostalCode(form.postalCode ?? ""),
+    country: checkCountry(form.country ?? ""),
   };
 
   function touch(key: string) {
@@ -212,14 +226,25 @@ export default function BusinessProfilePage() {
                   onBlur={() => touch("businessEmail")}
                 />
               </Field>
-              <Field label="Phone" htmlFor="phone" check={checks.phone} touched={touched.phone}>
+              <Field
+                label="Phone"
+                htmlFor="phone"
+                hint={`${MOBILE_DIGITS} digits.`}
+                check={checks.phone}
+                touched={touched.phone}
+              >
                 <Input
                   id="phone"
                   type="tel"
-                  inputMode="tel"
-                  autoComplete="tel"
+                  // numeric, not tel: this field holds digits only, so the keypad should not
+                  // offer + * # characters the field will silently strip anyway.
+                  inputMode="numeric"
+                  autoComplete="tel-national"
+                  maxLength={MOBILE_DIGITS}
                   value={form.phone ?? ""}
-                  onChange={(e) => update("phone", e.target.value)}
+                  // Stripped as it is typed rather than rejected afterwards — pasting a number
+                  // with spaces or a +91 should just work.
+                  onChange={(e) => update("phone", digitsOnly(e.target.value).slice(0, MOBILE_DIGITS))}
                   onBlur={() => touch("phone")}
                 />
               </Field>
@@ -240,18 +265,32 @@ export default function BusinessProfilePage() {
               <Field label="State" htmlFor="state">
                 <Input id="state" value={form.state ?? ""} onChange={(e) => update("state", e.target.value)} />
               </Field>
-              <Field label="Postal code" htmlFor="postalCode">
+              <Field
+                label="Postal code"
+                htmlFor="postalCode"
+                check={checks.postalCode}
+                touched={touched.postalCode}
+              >
                 <Input
                   id="postalCode"
+                  autoComplete="postal-code"
+                  // Letters as well as digits: a PIN code is numeric, but a postcode elsewhere
+                  // is not, and a business profile is not only ever Indian.
+                  maxLength={POSTAL_CODE_MAX}
                   value={form.postalCode ?? ""}
-                  onChange={(e) => update("postalCode", e.target.value)}
+                  onChange={(e) =>
+                    update("postalCode", alphanumericOnly(e.target.value).slice(0, POSTAL_CODE_MAX))
+                  }
+                  onBlur={() => touch("postalCode")}
                 />
               </Field>
-              <Field label="Country" htmlFor="country">
+              <Field label="Country" htmlFor="country" check={checks.country} touched={touched.country}>
                 <Input
                   id="country"
+                  autoComplete="country-name"
                   value={form.country ?? ""}
-                  onChange={(e) => update("country", e.target.value)}
+                  onChange={(e) => update("country", lettersOnly(e.target.value))}
+                  onBlur={() => touch("country")}
                 />
               </Field>
             </div>

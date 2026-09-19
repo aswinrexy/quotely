@@ -23,11 +23,16 @@ namespace Quotely.Api.Controllers;
 public class BillingController : ControllerBase
 {
     private readonly ISubscriptionService _subscriptions;
+    private readonly ISubscriptionEntitlementService _entitlements;
     private readonly ICurrentUser _currentUser;
 
-    public BillingController(ISubscriptionService subscriptions, ICurrentUser currentUser)
+    public BillingController(
+        ISubscriptionService subscriptions,
+        ISubscriptionEntitlementService entitlements,
+        ICurrentUser currentUser)
     {
         _subscriptions = subscriptions;
+        _entitlements = entitlements;
         _currentUser = currentUser;
     }
 
@@ -35,6 +40,16 @@ public class BillingController : ControllerBase
     [HttpGet("subscription")]
     public async Task<ActionResult<SubscriptionDto>> Get(CancellationToken ct) =>
         Ok(await _subscriptions.GetStatusAsync(_currentUser.Id, ct));
+
+    /// <summary>
+    /// What this business may currently do, and how much of each allowance is left.
+    ///
+    /// The interface reads this to decide what to show as locked. It is advisory: every gate is
+    /// enforced again on the endpoint that does the work, because a browser can be told anything.
+    /// </summary>
+    [HttpGet("entitlements")]
+    public async Task<ActionResult<EntitlementSummary>> Entitlements(CancellationToken ct) =>
+        Ok(await _entitlements.DescribeAsync(_currentUser.Id, ct));
 
     /// <summary>
     /// Redeems a coupon. The server decides what the code is worth; the browser only carries the

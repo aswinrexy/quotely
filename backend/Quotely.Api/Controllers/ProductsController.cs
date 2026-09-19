@@ -5,6 +5,7 @@ using Quotely.Api.Data;
 using Quotely.Api.DTOs;
 using Quotely.Api.Middleware;
 using Quotely.Api.Models;
+using Quotely.Api.Billing;
 using Quotely.Api.Services;
 
 namespace Quotely.Api.Controllers;
@@ -53,6 +54,8 @@ public class ProductsController : ControllerBase
     public async Task<ActionResult<ProductDto>> Get(Guid id, CancellationToken ct)
         => Ok(Map(await FindAsync(id, tracking: false, ct)));
 
+    /// <summary>Gated on the subscription; the rule lives in ISubscriptionEntitlementService.</summary>
+    [RequiresEntitlement(Entitlement.CreateProduct)]
     [HttpPost]
     public async Task<ActionResult<ProductDto>> Create(SaveProductRequest request, CancellationToken ct)
     {

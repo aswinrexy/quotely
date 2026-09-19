@@ -202,7 +202,8 @@ ProductionStartupCheck.Validate(
     builder.Environment,
     builder.Configuration.GetSection(RazorpayOptions.SectionName).Get<RazorpayOptions>() ?? new RazorpayOptions(),
     builder.Configuration.GetSection(EncryptionOptions.SectionName).Get<EncryptionOptions>() ?? new EncryptionOptions(),
-    corsOrigins);
+    corsOrigins,
+    builder.Configuration.GetSection(BillingOptions.SectionName).Get<BillingOptions>() ?? new BillingOptions());
 
 var app = builder.Build();
 

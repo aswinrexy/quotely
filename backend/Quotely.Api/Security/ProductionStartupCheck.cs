@@ -25,7 +25,8 @@ public static class ProductionStartupCheck
         IHostEnvironment environment,
         RazorpayOptions razorpay,
         EncryptionOptions encryption,
-        string[] corsOrigins)
+        string[] corsOrigins,
+        Billing.BillingOptions? billing = null)
     {
         if (!environment.IsProduction()) return;
 
@@ -76,6 +77,12 @@ public static class ProductionStartupCheck
             // testing. Refused rather than warned about.
             problems.Add("Razorpay__KeyId is a live key but Razorpay__Mode is not Live.");
         }
+
+        // ---- billing ----
+        // Enforcing limits without a way to pay past them traps a business at the tenth invoice
+        // with a button that cannot work. One switch without the other is a configuration error.
+        if (billing is { EnforceEntitlements: true, Enabled: false })
+            problems.Add("Billing__EnforceEntitlements is true but Billing__Enabled is false — a business that hits a limit would have no way to upgrade.");
 
         // ---- the browser's side ----
         if (corsOrigins.Length == 0)

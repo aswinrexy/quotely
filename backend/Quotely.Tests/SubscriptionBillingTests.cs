@@ -328,8 +328,12 @@ public class SubscriptionBillingTests : IClassFixture<QuotelyApiFactory>
 
         summary.HasAccess.Should().BeTrue();
         summary.CanCreateQuotation.Should().BeTrue();
-        summary.CanCreateInvoice.Should().BeTrue();
+        summary.CanConnectPayments.Should().BeTrue();
         summary.CanExportData.Should().BeTrue();
+        // A trial has no counted allowance at all — nothing to compare against.
+        summary.Invoices.HasLimit.Should().BeFalse();
+        summary.Customers.HasLimit.Should().BeFalse();
+        summary.Products.HasLimit.Should().BeFalse();
     }
 
     [Theory]

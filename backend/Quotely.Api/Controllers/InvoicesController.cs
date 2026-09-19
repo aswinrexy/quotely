@@ -56,9 +56,7 @@ public class InvoicesController : ControllerBase
     /// from a quotation. The customer must belong to the caller.
     /// </summary>
     /// <summary>Gated on the subscription; see the note on QuotationsController.Create.</summary>
-    [RequiresEntitlement(
-        Entitlement.CreateInvoice,
-        "Your Quotely subscription has ended. You can still view and export everything you have, and start again from Billing.")]
+    [RequiresEntitlement(Entitlement.CreateInvoice)]
     [HttpPost]
     [ProducesResponseType(typeof(InvoiceDto), StatusCodes.Status201Created)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]

@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import Link from "next/link";
 import { useAuth } from "@/lib/auth";
+import { EntitlementsProvider } from "@/lib/entitlements";
 import { Spinner } from "@/components/ui/states";
 import { Icon } from "@/components/ui/icons";
 import { PRIMARY_NAV, SECONDARY_NAV, SidebarContent, isActive } from "@/components/app/sidebar";
@@ -57,6 +58,9 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   );
 
   return (
+    // Entitlements are fetched once here and shared by every page beneath, rather than each page
+    // asking again. They decide what is shown as locked; the server decides what is allowed.
+    <EntitlementsProvider>
     <div className="min-h-screen lg:flex">
       <a
         href="#main"
@@ -115,5 +119,6 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
         </main>
       </div>
     </div>
+    </EntitlementsProvider>
   );
 }

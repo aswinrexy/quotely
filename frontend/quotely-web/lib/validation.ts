@@ -42,7 +42,13 @@ export function checkEmail(value: string, required = true): FieldCheck {
   const trimmed = value.trim();
   if (!trimmed) return required ? EMPTY : OK;
   if (/\s/.test(trimmed)) return fail("An email address cannot contain spaces.");
-  if (!/^[^@]+@[^@]+\.[^@]{2,}$/.test(trimmed)) return fail("Enter a valid email address, like name@business.com.");
+
+  // Deliberately requires a dot and a two-letter-or-longer ending after it, so "asw@iim" is
+  // rejected while "asw@iim.com" and "asw@iim.co.in" are accepted. The domain part cannot start
+  // or end with a dot or hyphen, which is what catches the remaining typos people actually make.
+  if (!/^[^\s@]+@[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?(\.[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?)*\.[A-Za-z]{2,}$/.test(trimmed))
+    return fail("Enter a valid email address, like name@business.com.");
+
   return OK;
 }
 
@@ -55,6 +61,68 @@ export function checkEmail(value: string, required = true): FieldCheck {
  * An Indian mobile is ten digits starting 6–9, and is the common case; with a country code it
  * becomes eleven or twelve. International numbers run to fifteen digits under E.164. Rejecting
  * anything outside that range catches typos without turning away a legitimate foreign customer.
+ */
+/** Keeps everything but digits. What the mobile fields store and validate. */
+export function digitsOnly(value: string): string {
+  return value.replace(/\D/g, "");
+}
+
+/** Letters, spaces, hyphens and apostrophes — the characters place names actually use. */
+export function lettersOnly(value: string): string {
+  return value.replace(/[^A-Za-z\s'-]/g, "");
+}
+
+/** Letters and digits, for a postal code. Upper-cased, since that is how they are written. */
+export function alphanumericOnly(value: string): string {
+  return value.replace(/[^A-Za-z0-9\s]/g, "").toUpperCase();
+}
+
+/** An Indian mobile number: exactly ten digits, beginning 6, 7, 8 or 9. */
+export const MOBILE_DIGITS = 10;
+
+/**
+ * A mobile number, for fields that are capped at ten digits and hold nothing but digits.
+ *
+ * Stricter than <see cref="checkPhone"/> on purpose: those fields strip non-digits as they are
+ * typed, so anything reaching here is already clean and the only question is the length and
+ * the leading digit.
+ */
+export function checkMobile(value: string, required = false): FieldCheck {
+  const digits = digitsOnly(value);
+  if (!digits) return required ? EMPTY : OK;
+
+  if (digits.length < MOBILE_DIGITS) return fail(`A mobile number is ${MOBILE_DIGITS} digits.`);
+  if (digits.length > MOBILE_DIGITS) return fail(`A mobile number is ${MOBILE_DIGITS} digits.`);
+  if (!/^[6-9]/.test(digits)) return fail("An Indian mobile number starts with 6, 7, 8 or 9.");
+
+  return OK;
+}
+
+/** A postal code: up to eight letters and digits. */
+export const POSTAL_CODE_MAX = 8;
+
+export function checkPostalCode(value: string): FieldCheck {
+  const trimmed = value.trim();
+  if (!trimmed) return OK;
+  if (!/^[A-Za-z0-9\s]+$/.test(trimmed)) return fail("A postal code uses letters and numbers only.");
+  if (trimmed.replace(/\s/g, "").length > POSTAL_CODE_MAX)
+    return fail(`A postal code is at most ${POSTAL_CODE_MAX} characters.`);
+  return OK;
+}
+
+/** A country name: letters only. */
+export function checkCountry(value: string): FieldCheck {
+  const trimmed = value.trim();
+  if (!trimmed) return OK;
+  if (!/^[A-Za-z\s'-]+$/.test(trimmed)) return fail("A country name uses letters only.");
+  if (trimmed.length < 2) return fail("That country name is too short.");
+  return OK;
+}
+
+/**
+ * A phone number in a field that accepts international formats — spaces, dashes, brackets and a
+ * leading + are all fine, because that is how people write numbers down. What is checked is the
+ * count of digits.
  */
 export function checkPhone(value: string, required = false): FieldCheck {
   const trimmed = value.trim();
@@ -73,14 +141,41 @@ export function checkPhone(value: string, required = false): FieldCheck {
   return OK;
 }
 
-/** What the API enforces: at least eight characters. Nothing more is invented here. */
+/**
+ * What the API actually enforces, mirrored here so the browser and the server agree.
+ *
+ * ASP.NET Identity is configured with RequiredLength = 8 and RequireNonAlphanumeric = false,
+ * leaving its defaults for the rest: a digit, a lower-case letter and an upper-case letter.
+ * The browser used to check only the length, so a password like "password" passed here and was
+ * then rejected by the server with a message nobody had been warned about.
+ *
+ * A special character is allowed but NOT required — matching RequireNonAlphanumeric = false.
+ */
 export const PASSWORD_MIN_LENGTH = 8;
+
+export interface PasswordRule {
+  label: string;
+  met: boolean;
+}
+
+/** The individual rules, so the form can show which are satisfied as someone types. */
+export function passwordRules(value: string): PasswordRule[] {
+  return [
+    { label: `At least ${PASSWORD_MIN_LENGTH} characters`, met: value.length >= PASSWORD_MIN_LENGTH },
+    { label: "A lower-case letter", met: /[a-z]/.test(value) },
+    { label: "An upper-case letter", met: /[A-Z]/.test(value) },
+    { label: "A number", met: /[0-9]/.test(value) },
+  ];
+}
 
 export function checkPassword(value: string): FieldCheck {
   if (!value) return EMPTY;
-  if (value.length < PASSWORD_MIN_LENGTH)
-    return fail(`Use at least ${PASSWORD_MIN_LENGTH} characters.`);
-  return OK;
+
+  const unmet = passwordRules(value).filter((rule) => !rule.met);
+  if (unmet.length === 0) return OK;
+
+  // One message naming what is still missing, rather than a rule at a time.
+  return fail(`Still needed: ${unmet.map((rule) => rule.label.toLowerCase()).join(", ")}.`);
 }
 
 /** Confirming a password: only meaningful once the first one is valid. */
