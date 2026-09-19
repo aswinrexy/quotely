@@ -10,6 +10,8 @@ import { checkRazorpayKeyId } from "@/lib/validation";
 import { ConfirmDialog } from "@/components/ui/dialog";
 import { DetailSkeleton, ErrorState } from "@/components/ui/states";
 import { PageHeader } from "@/components/app/page-header";
+import { UpgradeNotice } from "@/components/app/upgrade-notice";
+import { useLocked } from "@/lib/entitlements";
 import { Icon } from "@/components/ui/icons";
 import { cn } from "@/lib/cn";
 import type { MerchantConnection, MerchantConnectionStart } from "@/types";
@@ -25,6 +27,9 @@ const ENDPOINT = "/api/settings/payments/connection";
  */
 export default function PaymentsSettingsPage() {
   const toast = useToast();
+  // Connecting a payment account is paid. A free business still gets paid — by cash, transfer or
+  // cheque, recorded by hand — so the copy says that rather than implying they cannot take money.
+  const locked = useLocked("payments");
   const [connection, setConnection] = useState<MerchantConnection | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -94,7 +99,15 @@ export default function PaymentsSettingsPage() {
           <WebhookSetupCard url={connection.webhookUrl} secret={freshSecret} />
         )}
 
-        {!connected && <ConnectCard connection={connection} onConnected={onConnected} />}
+        {!connected &&
+          (locked ? (
+            <UpgradeNotice
+              title="Online payments are part of Quotely Pro"
+              body="Connect your own Razorpay account so customers can pay your invoices by UPI, card or netbanking — straight into your bank. You can still record cash, cheque and bank transfers on the free plan."
+            />
+          ) : (
+            <ConnectCard connection={connection} onConnected={onConnected} />
+          ))}
 
         {connected && (
           <SectionCard

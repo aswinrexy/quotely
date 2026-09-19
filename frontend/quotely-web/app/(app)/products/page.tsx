@@ -24,12 +24,15 @@ import {
   Tr,
 } from "@/components/ui/table";
 import { PageHeader } from "@/components/app/page-header";
+import { UsageHint } from "@/components/app/upgrade-notice";
+import { useEntitlements } from "@/lib/entitlements";
 import type { BusinessProfile, PagedResult, Product } from "@/types";
 
 const PAGE_SIZE = 20;
 
 export default function ProductsPage() {
   const toast = useToast();
+  const { entitlements } = useEntitlements();
   const [search, setSearch] = useState("");
   const [debounced, setDebounced] = useState("");
   const [page, setPage] = useState(1);
@@ -96,12 +99,15 @@ export default function ProductsPage() {
         title="Products & Services"
         description="Build your reusable pricing catalogue."
         action={
-          <Link href="/products/new">
-            <Button>
-              <Icon.plus className="h-4 w-4" />
-              Add item
-            </Button>
-          </Link>
+          <div className="flex flex-wrap items-center gap-3">
+            <UsageHint quota={entitlements?.products} what="products" />
+            <Link href="/products/new">
+              <Button>
+                <Icon.plus className="h-4 w-4" />
+                Add item
+              </Button>
+            </Link>
+          </div>
         }
       />
 

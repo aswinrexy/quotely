@@ -56,9 +56,7 @@ public class QuotationsController : ControllerBase
     /// that happens — creating a quotation, creating an invoice, and raising an invoice from a
     /// quotation — and the rule itself lives in ISubscriptionEntitlementService, not here.
     /// </summary>
-    [RequiresEntitlement(
-        Entitlement.CreateQuotation,
-        "Your Quotely subscription has ended. You can still view and export everything you have, and start again from Billing.")]
+    [RequiresEntitlement(Entitlement.CreateQuotation)]
     [HttpPost]
     public async Task<ActionResult<QuotationDto>> Create(SaveQuotationRequest request, CancellationToken ct)
     {
@@ -92,9 +90,7 @@ public class QuotationsController : ControllerBase
     /// once: a second call reports the existing invoice as a conflict rather than duplicating it.
     /// </summary>
     /// <summary>Gated on the subscription; see the note on QuotationsController.Create.</summary>
-    [RequiresEntitlement(
-        Entitlement.CreateInvoice,
-        "Your Quotely subscription has ended. You can still view and export everything you have, and start again from Billing.")]
+    [RequiresEntitlement(Entitlement.CreateInvoice)]
     [HttpPost("{id:guid}/convert-to-invoice")]
     [ProducesResponseType(typeof(InvoiceDto), StatusCodes.Status201Created)]
     [ProducesResponseType(StatusCodes.Status409Conflict)]

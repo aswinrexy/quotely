@@ -669,3 +669,33 @@ export interface SubscriptionCheckout {
   firstChargeAt?: string | null;
   shortUrl?: string | null;
 }
+
+// ---- entitlements: what this business may do without paying -----------------
+
+export interface UsageQuota {
+  used: number;
+  limit: number | null;
+  hasLimit: boolean;
+  exhausted: boolean;
+  remaining: number | null;
+}
+
+/**
+ * What the server says this account may currently do. Advisory only — every gate is enforced
+ * again on the endpoint that does the work, so this decides what to SHOW, never what to allow.
+ */
+export interface Entitlements {
+  hasAccess: boolean;
+  status: SubscriptionStatus;
+  accessEndsAt?: string | null;
+  enforcementEnabled: boolean;
+
+  canCreateQuotation: boolean;
+  canConnectPayments: boolean;
+  canAcceptPayments: boolean;
+  canExportData: boolean;
+
+  invoices: UsageQuota;
+  customers: UsageQuota;
+  products: UsageQuota;
+}

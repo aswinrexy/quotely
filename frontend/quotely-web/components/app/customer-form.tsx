@@ -7,7 +7,7 @@ import { useToast } from "@/components/ui/toast";
 import { Button } from "@/components/ui/button";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
 import { Field, Input, Textarea } from "@/components/ui/field";
-import { checkEmail, checkPhone, checkRequired } from "@/lib/validation";
+import { MOBILE_DIGITS, checkEmail, checkMobile, checkRequired, digitsOnly } from "@/lib/validation";
 import type { Customer } from "@/types";
 
 type CustomerFormValues = Omit<Customer, "id" | "createdAt">;
@@ -36,7 +36,7 @@ export function CustomerForm({ customer }: { customer?: Customer }) {
   const checks = {
     name: checkRequired(form.name, "A customer name"),
     email: checkEmail(form.email ?? "", false),
-    phone: checkPhone(form.phone ?? ""),
+    phone: checkMobile(form.phone ?? ""),
   };
 
   function touch(key: string) {
@@ -135,15 +135,23 @@ export function CustomerForm({ customer }: { customer?: Customer }) {
                 onBlur={() => touch("email")}
               />
             </Field>
-            <Field label="Phone" htmlFor="phone" check={checks.phone} touched={touched.phone}>
+            <Field
+              label="Phone"
+              htmlFor="phone"
+              hint={`${MOBILE_DIGITS} digits.`}
+              check={checks.phone}
+              touched={touched.phone}
+            >
               <Input
                 id="phone"
                 type="tel"
-                // Brings up the phone keypad on a mobile, which is most of where these get typed.
-                inputMode="tel"
-                autoComplete="tel"
+                // Digits only, so the numeric keypad rather than the telephone one — the latter
+                // offers + * # that this field strips anyway.
+                inputMode="numeric"
+                autoComplete="tel-national"
+                maxLength={MOBILE_DIGITS}
                 value={form.phone ?? ""}
-                onChange={(e) => update("phone", e.target.value)}
+                onChange={(e) => update("phone", digitsOnly(e.target.value).slice(0, MOBILE_DIGITS))}
                 onBlur={() => touch("phone")}
               />
             </Field>

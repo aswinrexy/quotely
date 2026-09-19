@@ -27,12 +27,17 @@ import {
   Tr,
 } from "@/components/ui/table";
 import { PageHeader } from "@/components/app/page-header";
+import { UpgradeNotice } from "@/components/app/upgrade-notice";
+import { useLocked } from "@/lib/entitlements";
 import { QUOTATION_STATUSES, type PagedResult, type QuotationListItem } from "@/types";
 
 const PAGE_SIZE = 10;
 
 export default function QuotationsPage() {
   const toast = useToast();
+  // Quotations are a paid feature. The page still lists whatever the business already has —
+  // their records do not disappear — but the way to create another is replaced with the reason.
+  const locked = useLocked("quotations");
   const params = useSearchParams();
   const [search, setSearch] = useState("");
   const [debounced, setDebounced] = useState("");
@@ -109,14 +114,24 @@ export default function QuotationsPage() {
         title="Quotations"
         description="Create and manage customer quotations."
         action={
-          <Link href="/quotations/new">
-            <Button>
-              <Icon.plus className="h-4 w-4" />
-              New quotation
-            </Button>
-          </Link>
+          locked ? undefined : (
+            <Link href="/quotations/new">
+              <Button>
+                <Icon.plus className="h-4 w-4" />
+                New quotation
+              </Button>
+            </Link>
+          )
         }
       />
+
+      {locked && (
+        <UpgradeNotice
+          className="mb-4"
+          title="Quotations are part of Quotely Pro"
+          body="Send priced quotations your customers can accept or decline online, then turn an accepted one into an invoice without retyping it. Anything you have already created stays here."
+        />
+      )}
 
       <Card>
         <div className="flex flex-wrap gap-2 border-b border-ash p-3">

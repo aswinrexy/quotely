@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Quotely.Api.Billing;
 using Quotely.Api.DTOs;
 using Quotely.Api.Services;
 
@@ -36,6 +37,8 @@ public class MerchantConnectionsController : ControllerBase
     /// Attaches a Razorpay account from the merchant's own API keys. The response carries the
     /// webhook secret once and only once.
     /// </summary>
+    /// <summary>Gated on the subscription; the rule lives in ISubscriptionEntitlementService.</summary>
+    [RequiresEntitlement(Entitlement.ConnectPayments)]
     [HttpPost("razorpay/keys")]
     public async Task<ActionResult<MerchantConnectionDto>> ConnectKeys(
         ConnectRazorpayKeysRequest request, CancellationToken ct) =>
@@ -46,6 +49,8 @@ public class MerchantConnectionsController : ControllerBase
     /// navigates there itself rather than being redirected by us, so a failure is a visible error
     /// on the settings page instead of an opaque 302.
     /// </summary>
+    /// <summary>Gated on the subscription; the rule lives in ISubscriptionEntitlementService.</summary>
+    [RequiresEntitlement(Entitlement.ConnectPayments)]
     [HttpPost("razorpay/oauth/start")]
     public async Task<ActionResult<MerchantConnectionStartDto>> StartOauth(CancellationToken ct) =>
         Ok(await _connections.StartOauthAsync(_currentUser.Id, ct));

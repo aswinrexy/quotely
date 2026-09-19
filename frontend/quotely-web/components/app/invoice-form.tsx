@@ -9,6 +9,8 @@ import { calculateLine, calculateTotals } from "@/lib/money";
 import { useToast } from "@/components/ui/toast";
 import { Button } from "@/components/ui/button";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
+import { cn } from "@/lib/cn";
+import { Icon } from "@/components/ui/icons";
 import { Field, Input, Select, Textarea, inputClass } from "@/components/ui/field";
 import { LoadingState } from "@/components/ui/states";
 import { UNITS } from "@/components/app/product-form";
@@ -260,11 +262,11 @@ export function InvoiceForm({ initialCustomerId }: { initialCustomerId?: string 
         />
 
         <div className="hidden lg:block">
-          <div className="grid grid-cols-[minmax(0,3fr)_90px_120px_110px_90px_120px_40px] gap-2 border-b border-ash bg-paper px-4 py-2 text-caption font-semibold uppercase tracking-wide text-fog">
+          <div className="grid grid-cols-[minmax(0,3fr)_112px_120px_120px_88px_120px_44px] gap-2 border-b border-ash bg-paper px-4 py-2 text-caption font-semibold uppercase tracking-wide text-fog">
             <span>Product / Service</span>
             <span className="text-right">Qty</span>
             <span className="text-right">Unit price</span>
-            <span className="text-right">Discount</span>
+            <span className="text-right">Discount price</span>
             <span className="text-right">Tax %</span>
             <span className="text-right">Total</span>
             <span />
@@ -282,7 +284,7 @@ export function InvoiceForm({ initialCustomerId }: { initialCustomerId?: string 
 
             return (
               <div key={row.key} className="px-4 py-4 lg:py-3">
-                <div className="grid gap-3 lg:grid-cols-[minmax(0,3fr)_90px_120px_110px_90px_120px_40px] lg:items-start lg:gap-2">
+                <div className="grid gap-3 lg:grid-cols-[minmax(0,3fr)_112px_120px_120px_88px_120px_44px] lg:items-start lg:gap-2">
                   <div className="space-y-2">
                     <Select
                       aria-label={`Catalogue item for line ${index + 1}`}
@@ -330,7 +332,7 @@ export function InvoiceForm({ initialCustomerId }: { initialCustomerId?: string 
                         aria-label={`Unit for line ${index + 1}`}
                         value={row.unit}
                         onChange={(e) => updateRow(row.key, { unit: e.target.value })}
-                        className="mt-1 w-full rounded-input border border-ash bg-canvas px-1 py-1 text-caption text-steel"
+                        className="mt-1.5 w-full truncate rounded-input border border-ash bg-canvas px-2 py-1 text-caption text-steel"
                       >
                         {UNITS.map((unit) => (
                           <option key={unit} value={unit}>
@@ -349,7 +351,7 @@ export function InvoiceForm({ initialCustomerId }: { initialCustomerId?: string 
                     </div>
 
                     <label className="lg:hidden">
-                      <span className="text-caption font-medium text-fog">Discount</span>
+                      <span className="text-caption font-medium text-fog">Discount price</span>
                       <MoneyInput field="discount" row={row} onChange={updateRow} />
                     </label>
                     <div className="hidden lg:block">
@@ -378,9 +380,15 @@ export function InvoiceForm({ initialCustomerId }: { initialCustomerId?: string 
                       onClick={() => setRows((current) => current.filter((r) => r.key !== row.key))}
                       disabled={rows.length === 1}
                       aria-label={`Remove line ${index + 1}`}
-                      className="rounded-input px-2 py-1 text-caption font-medium text-fog hover:bg-paper hover:text-rose-ink disabled:opacity-40"
+                      title="Remove this line"
+                      className={cn(
+                        "inline-flex h-9 w-9 items-center justify-center rounded-input",
+                        "text-fog transition-colors duration-150 ease-out",
+                        "hover:bg-rose-wash hover:text-rose-ink",
+                        "disabled:pointer-events-none disabled:opacity-30",
+                      )}
                     >
-                      Remove
+                      <Icon.trash className="h-4 w-4" />
                     </button>
                   </div>
                 </div>

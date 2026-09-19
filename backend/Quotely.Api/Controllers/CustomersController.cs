@@ -5,6 +5,7 @@ using Quotely.Api.Data;
 using Quotely.Api.DTOs;
 using Quotely.Api.Middleware;
 using Quotely.Api.Models;
+using Quotely.Api.Billing;
 using Quotely.Api.Services;
 
 namespace Quotely.Api.Controllers;
@@ -70,6 +71,8 @@ public class CustomersController : ControllerBase
         Guid id, [FromQuery] int page = 1, [FromQuery] int pageSize = 10, CancellationToken ct = default)
         => Ok(await _summaries.GetAsync(_currentUser.Id, id, page, pageSize, ct));
 
+    /// <summary>Gated on the subscription; the rule lives in ISubscriptionEntitlementService.</summary>
+    [RequiresEntitlement(Entitlement.CreateCustomer)]
     [HttpPost]
     public async Task<ActionResult<CustomerDto>> Create(SaveCustomerRequest request, CancellationToken ct)
     {
