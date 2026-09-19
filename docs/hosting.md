@@ -34,11 +34,34 @@ to justify it; until then the platform domains are real, HTTPS-terminated URLs t
 | Supabase PostgreSQL | **Live**, migrated, empty | `ap-southeast-2` (Sydney) |
 | Render API | **Live**, smoke-tested | https://quotely-api-yiul.onrender.com |
 | Health | **Live** | https://quotely-api-yiul.onrender.com/health |
-| Razorpay webhook | Endpoint live, **not yet registered** | https://quotely-api-yiul.onrender.com/api/webhooks/razorpay |
 | Cloudflare Pages | **Live** | https://quotely-4j2.pages.dev |
 
-Both the API and the web app deploy from **`feature/v2.6-quotation-sharing`**, not `main`: `main`
-is still at V2.4 and has neither V2.5 nor V2.6. Repoint both once V2.6 has been released there.
+### Webhook routes changed in V2.7
+
+`/api/webhooks/razorpay` **no longer exists.** It assumed one Razorpay account for everybody, which
+is exactly what V2.7 removed. It is replaced by two routes that cannot be mistaken for each other:
+
+| Route | What it carries | Secret |
+| --- | --- | --- |
+| `/api/webhooks/razorpay/m/{routeToken}` | A business's invoice payments | That business's own, shown once when they connect |
+| `/api/webhooks/razorpay/billing` | Quotely's ₹150/month subscriptions | `Razorpay__WebhookSecret` |
+
+**The webhook currently registered in the founder's Razorpay dashboard points at the old path and
+will now be rejected.** It has to be re-pointed at whichever of the two it was actually for — see
+"Deploying V2.7" below.
+
+### Deploy branches
+
+Render and Cloudflare Pages must both track **`main`**. They were pointed at
+`feature/v2.6-quotation-sharing`, which was deleted when that branch merged, so until they are
+repointed neither can redeploy — the live sites are serving their last successful build.
+
+- Render → **quotely-api** → Settings → Build & Deploy → Branch → `main` → Manual Deploy
+- Cloudflare Pages → **quotely** → Settings → Builds & deployments → Production branch → `main`
+
+After that, every merge to `main` redeploys both automatically. Supabase is not automatic and never
+will be: `Database__AutoMigrate` is `false` in production, so a schema change is a deliberate step
+you take before the deploy that needs it.
 
 ---
 
@@ -505,3 +528,110 @@ store should be replaced, and a test secret costs nothing to rotate.
 - [`environments.md`](environments.md) — configuration, secrets and the environment matrix
 - [`development-workflow.md`](development-workflow.md) — branches, releases and pull requests
 - [`architecture.md`](architecture.md) — how the application itself is put together
+
+
+---
+
+## Deploying V2.7
+
+V2.7 adds two things a deployment has to be told about: a key that encrypts merchant credentials,
+and a schema that did not exist before. Neither has a safe default, so both are steps rather than
+assumptions.
+
+### 1. Generate the encryption key
+
+```bash
+openssl rand -base64 32
+```
+
+Set it in Render as **`Encryption__Key`**. Do not put it in this repository, in a commit message,
+or in a chat window — including this one.
+
+Without it, production **refuses to start**. That is deliberate: the alternative is a deployment
+that boots, accepts a merchant's Razorpay secret, and cannot encrypt it.
+
+Losing it is not recoverable. Every merchant's stored credentials become unreadable and every
+business has to reconnect their payment account. Keep a copy wherever you keep the database
+password.
+
+### 2. Apply the migrations
+
+Two migrations, both additive and forward-only. Nothing is dropped and no existing row is rewritten.
+
+```bash
+export DOTNET_ROOT=$HOME/.dotnet
+export PATH=$HOME/.dotnet:$HOME/.dotnet/tools:$PATH
+export DOTNET_ROLL_FORWARD=Major
+
+# Against the production database. Take a snapshot first — the free tier has no backups.
+export ConnectionStrings__DefaultConnection='<the Supabase session pooler string>'
+export Database__Provider=Postgres
+
+dotnet ef database update \
+  --project backend/Quotely.Migrations.PostgreSql \
+  --startup-project backend/Quotely.Migrations.PostgreSql
+```
+
+`AddMerchantPaymentConnections` creates the connections table, adds `MerchantConnectionId` to
+`Payments`, and widens `WebhookEvents.EventId` to hold a connection-scoped key.
+`AddSaasSubscriptions` creates `Subscriptions`, `Coupons` and `CouponRedemptions`.
+
+Existing payments keep a null `MerchantConnectionId`. That is the truthful record: they were
+collected before there was more than one account to collect into.
+
+### 3. Set the rest of the environment
+
+| Variable | Value |
+| --- | --- |
+| `Razorpay__Mode` | `Test` |
+| `Billing__Enabled` | `false` |
+| `Billing__EnforceEntitlements` | `false` |
+| `Admin__Emails__0` | your email, or leave unset for no admin view |
+
+`Razorpay__Oauth__*` stay empty until Razorpay approves the partner application.
+
+### 4. Connect your own Razorpay account
+
+**Online payments now stop working until you do this** — for you and for every other business.
+That is the milestone, not a regression: an invoice can no longer be paid into an account that does
+not belong to whoever issued it.
+
+1. Sign in to Quotely → **Settings → Payments**
+2. Paste your Razorpay **test** Key ID and Key Secret
+3. Copy the webhook URL and secret from the card that appears — **the secret is shown once**
+4. In Razorpay → **Account & Settings → Webhooks**, either update the existing webhook to the new
+   URL and secret or add a new one, with `payment.authorized`, `payment.captured`, `payment.failed`
+   and `order.paid`
+
+### 5. Verify
+
+```bash
+curl -s https://quotely-api-yiul.onrender.com/health
+```
+
+Then, signed in: Settings → Payments shows **Connected**; Settings → Billing shows a trial and
+₹150/month; a public invoice link offers a Pay button again. A test payment should reach **your**
+Razorpay dashboard.
+
+---
+
+## Turning on real money
+
+Nothing here happens automatically, and none of it is done by the application.
+
+- [ ] Razorpay account fully activated for live payments (their KYC, not ours)
+- [ ] Migrations applied to production and verified
+- [ ] `Encryption__Key` set, and backed up somewhere you will still have in a year
+- [ ] Health check green, both live URLs verified by hand
+- [ ] Set `Razorpay__Mode=Live` **and** replace `Razorpay__KeyId`, `Razorpay__KeySecret`,
+      `Razorpay__WebhookSecret` with live values **in the same edit** — production refuses to start
+      on a half-switched configuration, which is the intended behaviour and not a failure
+- [ ] Every business reconnects their payment account with **live** keys. Test connections are
+      refused in live mode, in both directions, on purpose
+- [ ] One small real transaction, authorised by you, by hand
+- [ ] Verify: webhook delivered, ledger correct, invoice moved to Paid, money in the **business's**
+      account and not Quotely's
+- [ ] Only then consider `Billing__Enabled=true`
+
+**Everything is ready up to that line. The remaining step is manual activation of live Razorpay and
+a controlled real transaction, and it is yours to make.**

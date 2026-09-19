@@ -616,3 +616,56 @@ export interface MerchantConnectionStart {
   authorizationUrl: string;
   state: string;
 }
+
+// ---- billing: what this business pays Quotely ------------------------------
+
+export type SubscriptionStatus = "Trialing" | "Active" | "PastDue" | "Cancelled" | "Expired";
+
+/**
+ * The business's own subscription to Quotely. Note what is absent: no Razorpay subscription id,
+ * no plan id, no key. The owner is told what they pay and when, not how we integrate.
+ */
+export interface Subscription {
+  planCode: string;
+  planName: string;
+  planDescription?: string | null;
+  price: number;
+  currency: string;
+  interval: string;
+
+  status: SubscriptionStatus;
+  statusMessage?: string | null;
+
+  trialStart?: string | null;
+  trialEnd?: string | null;
+  inTrial: boolean;
+
+  currentPeriodStart?: string | null;
+  currentPeriodEnd?: string | null;
+
+  cancelRequestedAt?: string | null;
+  cancelledAt?: string | null;
+  lastPaymentAt?: string | null;
+
+  hasActiveMandate: boolean;
+  hasAccess: boolean;
+  accessEndsAt?: string | null;
+  nextPaymentAt?: string | null;
+
+  /** False when this deployment does not charge for anything. */
+  billingEnabled: boolean;
+
+  couponCode?: string | null;
+  couponRedeemedAt?: string | null;
+  couponFreeMonths?: number | null;
+}
+
+export interface SubscriptionCheckout {
+  keyId: string;
+  subscriptionId: string;
+  planName: string;
+  price: number;
+  currency: string;
+  firstChargeAt?: string | null;
+  shortUrl?: string | null;
+}

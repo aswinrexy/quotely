@@ -426,6 +426,109 @@ the network.
 Not built for V2.3, by instruction: refunds, subscriptions, manual payment entry, and any second
 provider.
 
+## Three identities (V2.7)
+
+The most important rule in this codebase. Almost every mistake available in the payment code is a
+confusion between these three, so they are named, separated by type, and tested apart.
+
+```
+                    ┌──────────────────────────────────────────┐
+                    │  QUOTELY PLATFORM                        │
+                    │  owns the SaaS · receives ₹150/month     │
+                    │  RazorpayOptions · ISaasBillingProvider  │
+                    └────────────────▲─────────────────────────┘
+                                     │ ₹150/month subscription
+                                     │
+                    ┌────────────────┴─────────────────────────┐
+                    │  TENANT — a business using Quotely       │
+                    │  owns its OWN Razorpay merchant account  │
+                    │  MerchantPaymentConnection               │
+                    └────────────────▲─────────────────────────┘
+                                     │ pays an invoice
+                                     │
+                    ┌────────────────┴─────────────────────────┐
+                    │  TENANT'S CUSTOMER                       │
+                    └──────────────────────────────────────────┘
+
+Customer ──pays invoice──▶ TENANT'S Razorpay ──▶ tenant's bank
+Tenant ────pays ₹150/mo──▶ QUOTELY'S Razorpay ──▶ Quotely's bank
+```
+
+| | Merchant payments | SaaS billing |
+| --- | --- | --- |
+| Interface | `IMerchantPaymentProvider` | `ISaasBillingProvider` |
+| Credentials | Per tenant, encrypted at rest | `Razorpay__*` configuration |
+| Resolved by | `IMerchantConnectionService.ResolveAsync(userId)` | Configuration, once |
+| Webhook | `/api/webhooks/razorpay/m/{routeToken}` | `/api/webhooks/razorpay/billing` |
+| Webhook secret | One per connection | `Razorpay__WebhookSecret` |
+| Idempotency key | `{connectionId}:{eventId}` | `{eventId}`, provider `Razorpay:Billing` |
+
+**Nothing implements both interfaces.** No service holds both sets of credentials. The two webhook
+routes cannot accept each other's deliveries, and there is a test asserting that a merchant's
+webhook secret cannot move a subscription.
+
+### How a payment finds the right account
+
+```
+Invoice ──UserId──▶ MerchantPaymentConnection ──▶ decrypted credentials ──▶ Razorpay
+```
+
+`MerchantPaymentContext` is required by every method on `IMerchantPaymentProvider`, and it is built
+in exactly one place — `MerchantConnectionService.ResolveAsync`, which takes a tenant id and
+nothing else. There is no overload that accepts a connection id, because accepting one would mean
+accepting a caller's claim about whose account collects the money.
+
+The adapter holds no credentials of its own. Its `HttpClient` deliberately has no default
+`Authorization` header: a header set in a constructor outlives the request that set it, which is
+precisely how one tenant's key becomes reachable from another tenant's request.
+
+### Why the webhook route token is in the URL
+
+A webhook body is attacker-controlled until its signature has been verified, and the signature
+cannot be verified until a secret — and therefore a merchant — has been chosen. Choosing that
+merchant by reading `account_id` out of the unverified body would let the attacker pick the key
+their forgery is checked against.
+
+So: the URL selects the connection, that connection's secret authenticates the body, and only then
+is `account_id` read — as a cross-check that must agree, never as the thing that decides.
+
+The token is 32 random bytes, not a row id, and it is reissued whenever a business disconnects.
+
+### Encryption at rest
+
+AES-256-GCM, key from `Encryption__Key`. Stored as `v1.{keyId}.{nonce}.{tag}.{ciphertext}`; the key
+id is a hash of the key, in the clear, so a rotation can decrypt old rows with the old key while
+writing new ones with the new one — no migration that touches every secret at once.
+
+Not ASP.NET Data Protection: its keys rotate on their own and live on the filesystem, so on a
+container rebuilt every deploy, ciphertext written before a deploy could not be read after it.
+
+## Subscriptions and entitlements (V2.7)
+
+Subscription state is an explicit enum, never a boolean. "Is this paid?" has more than two answers:
+a trial has not been paid and should have full access, and a past-due account has been paid and
+should not be locked out over a webhook that is thirty seconds late.
+
+| Status | Access | Why |
+| --- | --- | --- |
+| `Trialing` | Until `TrialEnd` | Free period, with an end date |
+| `Active` | Yes | Paying and current |
+| `PastDue` | **Yes** | Razorpay retries for days; a late webhook is not a reason to lock someone out |
+| `Cancelled` | Until `CurrentPeriodEnd` | They paid for those days |
+| `Expired` | No | The only state that restricts anything |
+
+Gating goes through `ISubscriptionEntitlementService` and is applied by `[RequiresEntitlement]` on
+exactly three endpoints: create quotation, create invoice, convert quotation to invoice. What an
+account without a subscription may still do — sign in, read, export, reach Billing, and accept
+payments on invoices already issued — is configuration, not a constant. Enforcement is off by
+default.
+
+`QUOTELY6` grants six calendar months. Once per account is the unique index on
+`(CouponId, UserId)`, not a check two concurrent requests can both pass; the coupon's own
+redemption limit is guarded by a rotated concurrency token with a bounded retry. An explicit
+transaction looks like it prevents over-redemption and does not — a read inside one still cannot
+see a sibling's uncommitted increment.
+
 ## Extension points left open for V2
 
 - `BusinessProfile.LogoUrl` is a plain string holding a data URI; switching to blob storage only

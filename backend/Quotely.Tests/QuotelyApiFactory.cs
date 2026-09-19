@@ -75,7 +75,8 @@ public class QuotelyApiFactory : WebApplicationFactory<Program>, IAsyncLifetime
             // A real 32-byte key, so merchant credentials are genuinely encrypted in the suite
             // rather than the encryption being stubbed out. Test-only, and not a secret: it
             // protects nothing but throwaway fake keys in an in-memory database.
-            ["Encryption:Key"] = "dGVzdC1vbmx5LWtleS1kby1ub3QtdXNlLWluLXByb2Q="
+            ["Encryption:Key"] = "dGVzdC1vbmx5LWtleS1kby1ub3QtdXNlLWluLXByb2Q=",
+            ["Admin:Emails:0"] = AdminEmail
         }));
 
         builder.ConfigureServices(services =>
@@ -175,6 +176,9 @@ public class QuotelyApiFactory : WebApplicationFactory<Program>, IAsyncLifetime
     /// substituted for each other is one of the things the tests are for.
     /// </summary>
     public const string PlatformWebhookSecret = "quotely_platform_webhook_secret_for_tests";
+
+    /// <summary>The one account the suite treats as an administrator.</summary>
+    public const string AdminEmail = "founder@quotely.test";
 
     public sealed record MerchantTestConnection(string WebhookUrl, string WebhookSecret, string KeySecret);
 

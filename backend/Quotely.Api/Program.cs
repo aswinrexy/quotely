@@ -141,6 +141,7 @@ builder.Services.AddHttpClient<ISaasBillingProvider, RazorpaySaasBillingProvider
 builder.Services.AddScoped<ISubscriptionService, SubscriptionService>();
 builder.Services.AddScoped<ISubscriptionEntitlementService, SubscriptionEntitlementService>();
 builder.Services.AddScoped<ISubscriptionWebhookService, SubscriptionWebhookService>();
+builder.Services.Configure<AdminOptions>(builder.Configuration.GetSection(AdminOptions.SectionName));
 
 // ---- payments ----
 // TWO SEPARATE MONEY FLOWS, and they do not share credentials.

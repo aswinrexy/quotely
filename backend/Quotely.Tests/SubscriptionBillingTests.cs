@@ -534,3 +534,52 @@ public class SubscriptionBillingTests : IClassFixture<QuotelyApiFactory>
         return code;
     }
 }
+
+/// <summary>
+/// The internal billing overview. Two questions only: can a non-admin reach it, and does it leak
+/// anything it should not.
+/// </summary>
+public class AdminBillingTests : IClassFixture<QuotelyApiFactory>
+{
+    private readonly QuotelyApiFactory _factory;
+
+    public AdminBillingTests(QuotelyApiFactory factory) => _factory = factory;
+
+    [Fact]
+    public async Task An_ordinary_account_cannot_reach_the_overview()
+    {
+        var client = await _factory.CreateSignedInClientAsync(connectPayments: false);
+
+        var response = await client.GetAsync("/api/admin/billing/accounts");
+
+        // 404 rather than 403: a non-admin should not learn that a guarded route exists.
+        response.StatusCode.Should().Be(HttpStatusCode.NotFound);
+    }
+
+    [Fact]
+    public async Task An_anonymous_request_is_refused()
+    {
+        (await _factory.CreateClient().GetAsync("/api/admin/billing/accounts"))
+            .StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+    }
+
+    [Fact]
+    public async Task The_admin_named_in_configuration_sees_statuses_and_no_secrets()
+    {
+        var client = await _factory.CreateSignedInClientAsync(QuotelyApiFactory.AdminEmail);
+        await _factory.ConnectRazorpayAsync(client);
+
+        var response = await client.GetAsync("/api/admin/billing/accounts");
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+
+        var body = await response.Content.ReadAsStringAsync();
+
+        body.Should().Contain("subscriptionStatus").And.Contain("paymentConnectionStatus");
+
+        // Nothing that could be used against an account, and nothing about their customers.
+        body.Should().NotContain(FakePaymentProvider.TestKeySecret);
+        body.Should().NotContain(_factory.ConnectionFor(client).WebhookSecret);
+        body.Should().NotContain("Cipher").And.NotContain("webhookRouteToken");
+        body.Should().NotContain("customer").And.NotContain("Customer");
+    }
+}
