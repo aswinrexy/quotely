@@ -1,4 +1,4 @@
-import type { PaymentOrder } from "@/types";
+import type { PaymentOrder, SubscriptionCheckout } from "@/types";
 
 /**
  * The only Razorpay-aware code in the browser. The checkout script is fetched on demand — when
@@ -11,6 +11,19 @@ const CHECKOUT_SRC = "https://checkout.razorpay.com/v1/checkout.js";
 interface RazorpayHandlerResponse {
   razorpay_payment_id: string;
   razorpay_order_id: string;
+  razorpay_signature: string;
+}
+
+/**
+ * What checkout hands back after a SUBSCRIPTION mandate is authorised.
+ *
+ * Note the second field: a subscription returns razorpay_subscription_id where a one-off payment
+ * returns razorpay_order_id. They are different flows with different signatures, which is why
+ * they have separate types here rather than one loose shape.
+ */
+interface RazorpaySubscriptionHandlerResponse {
+  razorpay_payment_id: string;
+  razorpay_subscription_id: string;
   razorpay_signature: string;
 }
 
@@ -110,6 +123,81 @@ export async function openCheckout(order: PaymentOrder): Promise<CheckoutOutcome
     instance.on("payment.failed", (payload: unknown) => {
       const description = (payload as { error?: { description?: string } } | undefined)?.error?.description;
       settle({ failure: description ?? "The payment could not be completed." });
+    });
+
+    instance.open();
+  });
+}
+
+
+export interface SubscriptionCheckoutOutcome {
+  /** The business closed the window without authorising. Nothing was set up, nothing charged. */
+  dismissed?: boolean;
+  /** Handed straight to the server to verify. Never treated here as "it worked". */
+  result?: {
+    razorpaySubscriptionId: string;
+    razorpayPaymentId: string;
+    razorpaySignature: string;
+  };
+  failure?: string;
+}
+
+/**
+ * Opens checkout for a SaaS subscription mandate — the business authorising Quotely to charge
+ * ₹150 a month.
+ *
+ * Embedded rather than a redirect to Razorpay's hosted short_url, for one concrete reason:
+ * subscriptions have no callback_url parameter, so a redirect leaves the business sitting on
+ * Razorpay's page with no way back and no confirmation in Quotely. Embedded checkout returns the
+ * signed result to this page, which hands it to the server to verify — and the business sees the
+ * outcome where they started.
+ *
+ * short_url stays as the fallback for when the script cannot load at all.
+ */
+export async function openSubscriptionCheckout(
+  checkout: SubscriptionCheckout,
+  account: { name?: string | null; email?: string | null },
+): Promise<SubscriptionCheckoutOutcome> {
+  const Razorpay = await loadCheckout();
+
+  return new Promise<SubscriptionCheckoutOutcome>((resolve) => {
+    let settled = false;
+    const settle = (outcome: SubscriptionCheckoutOutcome) => {
+      if (settled) return;
+      settled = true;
+      resolve(outcome);
+    };
+
+    const instance = new Razorpay({
+      key: checkout.keyId,
+      // A subscription is authorised by id; there is no order and no amount to pass. Razorpay
+      // reads what to charge, and when, from the plan and the subscription's start date.
+      subscription_id: checkout.subscriptionId,
+      name: "Quotely",
+      description: checkout.firstChargeAt
+        ? `${checkout.planName} — first payment ${new Date(checkout.firstChargeAt).toLocaleDateString()}`
+        : checkout.planName,
+      prefill: {
+        name: account.name ?? undefined,
+        email: account.email ?? undefined,
+      },
+      theme: { color: "#171717" },
+      handler: (response: RazorpaySubscriptionHandlerResponse) =>
+        settle({
+          result: {
+            razorpaySubscriptionId: response.razorpay_subscription_id,
+            razorpayPaymentId: response.razorpay_payment_id,
+            razorpaySignature: response.razorpay_signature,
+          },
+        }),
+      modal: {
+        ondismiss: () => settle({ dismissed: true }),
+      },
+    });
+
+    instance.on("payment.failed", (payload: unknown) => {
+      const description = (payload as { error?: { description?: string } } | undefined)?.error?.description;
+      settle({ failure: description ?? "The mandate could not be set up." });
     });
 
     instance.open();
