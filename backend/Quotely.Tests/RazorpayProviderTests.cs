@@ -20,15 +20,31 @@ public class RazorpayProviderTests
     private const string KeySecret = "unit_key_secret";
     private const string WebhookSecret = "unit_webhook_secret";
 
-    private static RazorpayPaymentProvider NewProvider() =>
+    private static RazorpayMerchantPaymentProvider NewProvider() =>
         new(new HttpClient(),
-            Options.Create(new RazorpayOptions
+            Options.Create(new RazorpayOptions()),
+            NullLogger<RazorpayMerchantPaymentProvider>.Instance);
+
+    /// <summary>
+    /// A merchant's credentials, as the connection service would hand them over. The adapter
+    /// holds none of its own any more, so every signature test states whose key it is using.
+    /// </summary>
+    private static MerchantPaymentContext Merchant(
+        string keyId = KeyId, string keySecret = KeySecret, MerchantConnectionMode mode = MerchantConnectionMode.KeyPair) =>
+        new()
+        {
+            ConnectionId = Guid.NewGuid(),
+            UserId = Guid.NewGuid(),
+            Provider = PaymentProviders.Razorpay,
+            Environment = PaymentEnvironment.Test,
+            Credentials = new MerchantCredentials
             {
-                KeyId = KeyId,
-                KeySecret = KeySecret,
-                WebhookSecret = WebhookSecret
-            }),
-            NullLogger<RazorpayPaymentProvider>.Instance);
+                Mode = mode,
+                PublicKey = keyId,
+                KeySecret = mode == MerchantConnectionMode.KeyPair ? keySecret : null,
+                AccessToken = mode == MerchantConnectionMode.Oauth ? "oauth_access_token" : null
+            }
+        };
 
     private static string Hmac(string payload, string secret)
     {
@@ -73,9 +89,10 @@ public class RazorpayProviderTests
     {
         var signature = Hmac("order_abc|pay_xyz", KeySecret);
 
-        var act = () => NewProvider().VerifyCheckoutSignature(new CheckoutResult("order_abc", "pay_xyz", signature));
+        var verification = NewProvider()
+            .VerifyCheckoutSignature(Merchant(), new CheckoutResult("order_abc", "pay_xyz", signature));
 
-        act.Should().NotThrow();
+        verification.Should().Be(CheckoutVerification.Verified);
     }
 
     [Theory]
@@ -83,7 +100,8 @@ public class RazorpayProviderTests
     [InlineData("")]
     public void A_wrong_checkout_signature_is_rejected(string signature)
     {
-        var act = () => NewProvider().VerifyCheckoutSignature(new CheckoutResult("order_abc", "pay_xyz", signature));
+        var act = () => NewProvider()
+            .VerifyCheckoutSignature(Merchant(), new CheckoutResult("order_abc", "pay_xyz", signature));
 
         act.Should().Throw<PaymentSignatureException>();
     }
@@ -94,7 +112,8 @@ public class RazorpayProviderTests
         // A valid signature from someone else's order must not open ours.
         var signature = Hmac("order_other|pay_xyz", KeySecret);
 
-        var act = () => NewProvider().VerifyCheckoutSignature(new CheckoutResult("order_abc", "pay_xyz", signature));
+        var act = () => NewProvider()
+            .VerifyCheckoutSignature(Merchant(), new CheckoutResult("order_abc", "pay_xyz", signature));
 
         act.Should().Throw<PaymentSignatureException>();
     }
@@ -104,7 +123,8 @@ public class RazorpayProviderTests
     {
         var signature = Hmac("order_abc|pay_xyz", "not_our_secret");
 
-        var act = () => NewProvider().VerifyCheckoutSignature(new CheckoutResult("order_abc", "pay_xyz", signature));
+        var act = () => NewProvider()
+            .VerifyCheckoutSignature(Merchant(), new CheckoutResult("order_abc", "pay_xyz", signature));
 
         act.Should().Throw<PaymentSignatureException>();
     }
@@ -120,7 +140,7 @@ public class RazorpayProviderTests
     {
         var body = Body();
 
-        var notification = NewProvider().ParseWebhook(body, Hmac(body, WebhookSecret), "evt_1");
+        var notification = NewProvider().ParseWebhook(WebhookSecret, body, Hmac(body, WebhookSecret), "evt_1");
 
         notification.EventId.Should().Be("evt_1");
         notification.EventType.Should().Be("payment.captured");
@@ -144,7 +164,7 @@ public class RazorpayProviderTests
 
         reserialised.Should().NotBe(body);
 
-        var act = () => NewProvider().ParseWebhook(body, Hmac(reserialised, WebhookSecret), "evt_1");
+        var act = () => NewProvider().ParseWebhook(WebhookSecret, body, Hmac(reserialised, WebhookSecret), "evt_1");
 
         act.Should().Throw<PaymentSignatureException>();
     }
@@ -155,10 +175,10 @@ public class RazorpayProviderTests
         var provider = NewProvider();
         var body = Body();
 
-        var missing = () => provider.ParseWebhook(body, null, "evt_1");
+        var missing = () => provider.ParseWebhook(WebhookSecret, body, null, "evt_1");
         missing.Should().Throw<PaymentSignatureException>();
 
-        var wrong = () => provider.ParseWebhook(body, Hmac(body, "other_secret"), "evt_1");
+        var wrong = () => provider.ParseWebhook(WebhookSecret, body, Hmac(body, "other_secret"), "evt_1");
         wrong.Should().Throw<PaymentSignatureException>();
     }
 
@@ -168,8 +188,8 @@ public class RazorpayProviderTests
         var body = Body();
         var provider = NewProvider();
 
-        var first = provider.ParseWebhook(body, Hmac(body, WebhookSecret), null);
-        var second = provider.ParseWebhook(body, Hmac(body, WebhookSecret), null);
+        var first = provider.ParseWebhook(WebhookSecret, body, Hmac(body, WebhookSecret), null);
+        var second = provider.ParseWebhook(WebhookSecret, body, Hmac(body, WebhookSecret), null);
 
         // Deterministic, so an identical redelivery still deduplicates.
         first.EventId.Should().Be(second.EventId);
@@ -185,8 +205,8 @@ public class RazorpayProviderTests
         var captured = Body("payment.captured", "captured");
         var authorized = Body("payment.authorized", "authorized");
 
-        var a = provider.ParseWebhook(captured, Hmac(captured, WebhookSecret), null);
-        var b = provider.ParseWebhook(authorized, Hmac(authorized, WebhookSecret), null);
+        var a = provider.ParseWebhook(WebhookSecret, captured, Hmac(captured, WebhookSecret), null);
+        var b = provider.ParseWebhook(WebhookSecret, authorized, Hmac(authorized, WebhookSecret), null);
 
         a.EventId.Should().NotBe(b.EventId);
     }
@@ -200,10 +220,10 @@ public class RazorpayProviderTests
         Parse(provider, "captured").Should().Be(PaymentStatus.Captured);
         Parse(provider, "failed").Should().Be(PaymentStatus.Failed);
 
-        static PaymentStatus Parse(RazorpayPaymentProvider provider, string status)
+        static PaymentStatus Parse(RazorpayMerchantPaymentProvider provider, string status)
         {
             var body = Body(status: status);
-            return provider.ParseWebhook(body, Hmac(body, WebhookSecret), "evt")!.Outcome!.Status;
+            return provider.ParseWebhook(WebhookSecret, body, Hmac(body, WebhookSecret), "evt")!.Outcome!.Status;
         }
     }
 
@@ -212,7 +232,7 @@ public class RazorpayProviderTests
     {
         var body = "{\"event\":\"refund.created\",\"payload\":{}}";
 
-        var notification = NewProvider().ParseWebhook(body, Hmac(body, WebhookSecret), "evt_r");
+        var notification = NewProvider().ParseWebhook(WebhookSecret, body, Hmac(body, WebhookSecret), "evt_r");
 
         notification.Outcome.Should().BeNull();
     }
@@ -227,19 +247,84 @@ public class RazorpayProviderTests
         PaymentStatus.Captured.SupersedesOrEquals(PaymentStatus.Captured).Should().BeTrue();
     }
 
-    [Fact]
-    public void An_unconfigured_provider_refuses_rather_than_calling_out()
-    {
-        var provider = new RazorpayPaymentProvider(
-            new HttpClient(),
-            Options.Create(new RazorpayOptions()),
-            NullLogger<RazorpayPaymentProvider>.Instance);
+    // ---- merchant isolation, at the adapter -----------------------------
 
-        provider.IsConfigured.Should().BeFalse();
+    [Fact]
+    public void A_signature_valid_for_one_merchant_is_rejected_for_another()
+    {
+        // Business A's Razorpay signs with Business A's secret. Presented against Business B's
+        // credentials it must fail — this is the property that makes one connection per tenant
+        // meaningful rather than decorative.
+        var signature = Hmac("order_abc|pay_xyz", KeySecret);
+
+        var act = () => NewProvider().VerifyCheckoutSignature(
+            Merchant(keyId: "rzp_test_other", keySecret: "a_different_merchants_secret"),
+            new CheckoutResult("order_abc", "pay_xyz", signature));
+
+        act.Should().Throw<PaymentSignatureException>();
+    }
+
+    [Fact]
+    public void An_oauth_connection_reports_that_it_cannot_verify_rather_than_passing()
+    {
+        // Under OAuth we never hold the merchant's signing secret. Saying "verified" here would
+        // record money on the browser's say-so; saying "failed" would reject every real payment.
+        var verification = NewProvider().VerifyCheckoutSignature(
+            Merchant(mode: MerchantConnectionMode.Oauth),
+            new CheckoutResult("order_abc", "pay_xyz", Hmac("order_abc|pay_xyz", KeySecret)));
+
+        verification.Should().Be(CheckoutVerification.NotVerifiable);
+    }
+
+    [Fact]
+    public void A_webhook_signed_with_another_merchants_secret_is_rejected()
+    {
+        var body = Body();
+
+        var act = () => NewProvider().ParseWebhook(
+            "this_merchants_webhook_secret", body, Hmac(body, "another_merchants_webhook_secret"), "evt_1");
+
+        act.Should().Throw<PaymentSignatureException>();
+    }
+
+    [Fact]
+    public void A_connection_without_credentials_refuses_rather_than_calling_out()
+    {
+        var provider = NewProvider();
 
         var act = async () => await provider.CreateOrderAsync(
+            new MerchantPaymentContext
+            {
+                ConnectionId = Guid.NewGuid(),
+                UserId = Guid.NewGuid(),
+                Provider = PaymentProviders.Razorpay,
+                Environment = PaymentEnvironment.Test,
+                Credentials = new MerchantCredentials
+                {
+                    Mode = MerchantConnectionMode.KeyPair,
+                    PublicKey = "rzp_test_something",
+                    KeySecret = null
+                }
+            },
             new CreateOrderRequest(100m, "INR", "INV-000001", Guid.NewGuid()));
 
-        act.Should().ThrowAsync<PaymentProviderException>();
+        act.Should().ThrowAsync<PaymentCredentialException>();
+    }
+
+    [Fact]
+    public void Credentials_do_not_appear_in_their_own_string_representation()
+    {
+        // An interpolated credentials object must not become a secret in a log line.
+        var credentials = new MerchantCredentials
+        {
+            Mode = MerchantConnectionMode.KeyPair,
+            PublicKey = "rzp_test_visible_key",
+            KeySecret = "the_secret_that_must_not_appear",
+            AccessToken = "the_token_that_must_not_appear"
+        };
+
+        $"{credentials}".Should()
+            .NotContain("the_secret_that_must_not_appear")
+            .And.NotContain("the_token_that_must_not_appear");
     }
 }

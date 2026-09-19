@@ -36,6 +36,26 @@ public static class PublicTokenGenerator
         token.Length is >= 20 and <= 128 &&
         token.All(c => char.IsAsciiLetterOrDigit(c) || c is '-' or '_');
 
+    /// <summary>
+    /// Compares a presented token against a stored hash in fixed time.
+    ///
+    /// The lookups that find a quotation or an invoice by token are equality searches on an
+    /// indexed hash column, where the database does the comparison and timing tells an attacker
+    /// nothing useful. This exists for the other shape: checking a token we have already fetched
+    /// by some other key — the OAuth `state` value — where a naive comparison would leak how many
+    /// leading characters were right.
+    /// </summary>
+    public static bool Matches(string? token, string? expectedHash)
+    {
+        if (string.IsNullOrWhiteSpace(token) || string.IsNullOrWhiteSpace(expectedHash)) return false;
+
+        var actual = Encoding.UTF8.GetBytes(Hash(token));
+        var expected = Encoding.UTF8.GetBytes(expectedHash.Trim().ToLowerInvariant());
+
+        return actual.Length == expected.Length &&
+               CryptographicOperations.FixedTimeEquals(actual, expected);
+    }
+
     private static string Base64UrlEncode(byte[] bytes) =>
         Convert.ToBase64String(bytes).TrimEnd('=').Replace('+', '-').Replace('/', '_');
 }
