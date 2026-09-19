@@ -83,13 +83,37 @@ token would give it the merchant's whole API.
 
 ### Two things still to do when approval lands
 
-1. **Register the webhook automatically.** `POST https://api.razorpay.com/v2/accounts/{account_id}/webhooks`
-   (**VERIFIED**) creates a webhook on a sub-merchant's account with a secret we choose; max 30 per
-   account. `MerchantConnectionService.CompleteOauthAsync` already generates and stores that secret
-   — the call that registers it at Razorpay is the missing step, and until it is made an OAuth
-   merchant would have to add the webhook by hand exactly as a key-pair merchant does.
-2. **Handle `account.app.authorization_revoked`,** so a merchant who revokes access at Razorpay is
-   marked `Error` here instead of failing on their next customer's payment.
+#### 1. Register the webhook automatically — REQUIRES RAZORPAY APPROVAL
+
+**Deliberately not implemented.** The endpoint exists and part of its specification is verified,
+but three things needed to call it correctly are not, and it cannot be exercised without approved
+partner credentials. Guessing would ship a webhook registration that silently fails — leaving a
+merchant with no webhook and no indication anything was wrong.
+
+| | Status |
+| --- | --- |
+| `POST https://api.razorpay.com/v2/accounts/{account_id}/webhooks` | **VERIFIED** |
+| Body: `url` (≤255 chars), `events[]`, optional `secret`, optional `alert_email` | **VERIFIED** |
+| Response includes `secret_exists: true`; max 30 webhooks per account | **VERIFIED** |
+| **Authorization header format** | **NOT VERIFIED — the docs conflict.** The endpoint's own curl example uses `-u <ACCESS_TOKEN>`, which is HTTP **Basic**. The OAuth guide says to "provide the access token in the **Bearer** authorisation header while requesting Razorpay APIs." These cannot both be right for this endpoint. |
+| **Whether `X-Razorpay-Account` is also required** | **NOT VERIFIED.** The account is already in the path, so it is probably redundant — but "probably" is not a basis for a payment integration. |
+| **Whether `order.paid` is an accepted event here** | **NOT VERIFIED.** The published list is `payment.authorized`, `payment.failed`, `payment.captured`, `payment.dispute.created`, `refund.failed`, `refund.created` "and so on". Quotely's handler depends on `order.paid`; if it is rejected, registration fails as a whole. |
+
+**What happens instead, today:** `CompleteOauthAsync` generates and stores the webhook secret, and
+the settings page shows the merchant the URL and secret so they register it themselves — exactly as
+a key-pair merchant does. That card used to be hidden for OAuth connections on the assumption that
+registration would be automatic; it is now shown for both modes, because hiding it would leave an
+OAuth merchant with no webhook at all.
+
+**To resolve:** once you have partner credentials, call the endpoint against a sandbox sub-merchant
+and observe which auth scheme it accepts and whether `order.paid` is allowed. Then implement it in
+`MerchantConnectionService.CompleteOauthAsync` behind the existing abstraction. No other code has
+to change.
+
+#### 2. Handle `account.app.authorization_revoked` — REQUIRES RAZORPAY APPROVAL
+
+So a merchant who revokes access at Razorpay is marked `Error` here, rather than discovering it on
+their next customer's payment. Cannot be tested without a partner application that can be revoked.
 
 ---
 

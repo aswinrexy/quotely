@@ -617,21 +617,72 @@ Razorpay dashboard.
 
 ## Turning on real money
 
-Nothing here happens automatically, and none of it is done by the application.
+Nothing here happens automatically, and none of it is done by the application. Work top to bottom;
+each step assumes the one above it succeeded.
 
-- [ ] Razorpay account fully activated for live payments (their KYC, not ours)
-- [ ] Migrations applied to production and verified
-- [ ] `Encryption__Key` set, and backed up somewhere you will still have in a year
-- [ ] Health check green, both live URLs verified by hand
-- [ ] Set `Razorpay__Mode=Live` **and** replace `Razorpay__KeyId`, `Razorpay__KeySecret`,
-      `Razorpay__WebhookSecret` with live values **in the same edit** — production refuses to start
-      on a half-switched configuration, which is the intended behaviour and not a failure
-- [ ] Every business reconnects their payment account with **live** keys. Test connections are
-      refused in live mode, in both directions, on purpose
-- [ ] One small real transaction, authorised by you, by hand
-- [ ] Verify: webhook delivered, ledger correct, invoice moved to Paid, money in the **business's**
-      account and not Quotely's
-- [ ] Only then consider `Billing__Enabled=true`
+| | Step | Who | Done when |
+| --- | --- | --- | --- |
+| **A** | Database migration applied to the Quotely Supabase database | You | `__EFMigrationsHistory` lists `AddMerchantPaymentConnections` and `AddSaasSubscriptions` |
+| **B** | Production deployment of V2.7 from `main` | You | `/health` returns 200 **and** `POST /api/webhooks/razorpay` returns **404** — that route only exists on V2.6, so a 400 means the old build is still serving |
+| **C** | Merchant connection completed | You | Settings → Payments shows **Connected**; the webhook is registered in your Razorpay dashboard with its new URL and secret |
+| **D** | Test payment completed | You | A payment on a public invoice link succeeds in Razorpay **test** mode |
+| **E** | Test webhook verified | You | The delivery shows 200 in Razorpay's webhook log, not 400 |
+| **F** | Payment ledger verified | You | `/api/invoices/{id}/payments` shows the capture once, not twice |
+| **G** | Invoice balance verified | You | Outstanding reaches 0 and status moves to **Paid** |
+| **H** | SaaS subscription test completed | You | Only after `Billing__Enabled=true`; a subscription is created and Settings → Billing reflects it |
+| **I** | SaaS webhook verified | You | A `subscription.*` delivery to `/api/webhooks/razorpay/billing` returns 200 |
+| **J** | Live credentials configured | You | `Razorpay__Mode=Live` **and** all three `Razorpay__*` values replaced **in one edit** |
+| **K** | Live webhook configured | You | Live-mode webhooks registered for both the merchant route and the billing route |
+| **L** | **First real transaction manually approved** | **You, by hand** | — |
 
-**Everything is ready up to that line. The remaining step is manual activation of live Razorpay and
-a controlled real transaction, and it is yours to make.**
+**Step L is yours alone.** It is not automated, not scripted, and nothing in this repository will
+perform it. Do it with the smallest amount your account permits, and verify the money landed in the
+**business's** account rather than Quotely's before doing anything else.
+
+### Why J must be a single edit
+
+Production refuses to start on a half-switched configuration — `Razorpay__Mode=Live` with test keys
+fails, and live keys with `Razorpay__Mode=Test` fails just as firmly. That is intended. If you save
+the mode and the keys separately, the service will fail to boot in between. Set all four in one go.
+
+### After J, every business must reconnect
+
+Test connections are refused in live mode, in both directions, on purpose. Each business — you
+included — reconnects in Settings → Payments with **live** keys and re-registers their webhook.
+Until they do, their invoices show the balance without a Pay button, which is the correct and safe
+state rather than a failure.
+
+---
+
+## Custom domain
+
+Nothing is hard-coded, and nothing should be. The domain lives entirely in configuration:
+
+| Setting | Value after purchase |
+| --- | --- |
+| `PublicLinks__BaseUrl` | `https://quotelyhq.com` — the **frontend**, never the API |
+| `Cors__AllowedOrigins__0` | `https://quotelyhq.com` |
+| `Razorpay__Oauth__RedirectUri` | `https://quotelyhq.com/settings/payments` |
+
+Target architecture:
+
+```
+https://quotelyhq.com            → Cloudflare Pages
+https://api.quotelyhq.com        → Render
+https://quotelyhq.com/q/{token}  → public quotation (a frontend route)
+https://quotelyhq.com/i/{token}  → public invoice   (a frontend route)
+```
+
+`PublicLinks__BaseUrl` must point at the **frontend**. Pointing it at `api.` produces share links
+that resolve to nothing — `/q/{token}` and `/i/{token}` are Next.js routes, not API routes.
+
+Once the custom domain is live, stop giving customers the `.onrender.com` address.
+
+### Availability is not clearance
+
+`quotelyhq.com` was **available** when checked on 19 September 2026, via Verisign RDAP. That is a
+statement about a registry, and nothing more.
+
+**Domain availability does not establish trademark clearance.** Someone has held `quotely.com`
+since 2006, and at least four other parties registered Quotely-shaped domains in the last two
+years. Get a lawyer's view before putting the name on anything you would find expensive to change.
