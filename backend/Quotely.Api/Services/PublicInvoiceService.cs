@@ -26,20 +26,23 @@ public class PublicInvoiceService : IPublicInvoiceService
 {
     private readonly AppDbContext _db;
     private readonly IPaymentService _payments;
-    private readonly IPaymentProvider _provider;
+    private readonly IMerchantPaymentProvider _provider;
+    private readonly IMerchantConnectionService _merchants;
     private readonly PublicLinkOptions _options;
     private readonly ILogger<PublicInvoiceService> _logger;
 
     public PublicInvoiceService(
         AppDbContext db,
         IPaymentService payments,
-        IPaymentProvider provider,
+        IMerchantPaymentProvider provider,
+        IMerchantConnectionService merchants,
         IOptions<PublicLinkOptions> options,
         ILogger<PublicInvoiceService> logger)
     {
         _db = db;
         _payments = payments;
         _provider = provider;
+        _merchants = merchants;
         _options = options.Value;
         _logger = logger;
     }
@@ -105,11 +108,18 @@ public class PublicInvoiceService : IPublicInvoiceService
         var invoice = await FindByTokenAsync(token, tracking: true, ct);
         var business = await LoadBusinessAsync(invoice.UserId, ct);
 
-        var (payment, order) = await _payments.StartPaymentAsync(invoice, ct);
+        // The merchant is resolved from the INVOICE'S OWN TENANT. Not from the request, not from
+        // configuration, not from a default. This single line is what sends the customer's money
+        // to the business that issued the invoice.
+        var merchant = await _merchants.ResolveAsync(invoice.UserId, ct);
+
+        var (payment, order) = await _payments.StartPaymentAsync(invoice, merchant, ct);
 
         return new PaymentOrderDto
         {
-            KeyId = _provider.PublicKey,
+            // The merchant's own publishable key — under OAuth, their public_token. Never a
+            // key belonging to Quotely or to any other business.
+            KeyId = merchant.Credentials.PublicKey,
             OrderId = order.OrderId,
             Amount = order.AmountInMinorUnits,
             Currency = order.Currency,
@@ -130,6 +140,7 @@ public class PublicInvoiceService : IPublicInvoiceService
         string token, VerifyPaymentRequest request, CancellationToken ct = default)
     {
         var invoice = await FindByTokenAsync(token, tracking: false, ct);
+        var merchant = await _merchants.ResolveAsync(invoice.UserId, ct);
 
         // The order must be one we created for this very invoice. Without this check a valid
         // signature from someone else's order would credit the wrong invoice.
@@ -146,8 +157,20 @@ public class PublicInvoiceService : IPublicInvoiceService
 
         try
         {
-            _provider.VerifyCheckoutSignature(
+            var verification = _provider.VerifyCheckoutSignature(
+                merchant,
                 new CheckoutResult(request.RazorpayOrderId, request.RazorpayPaymentId, request.RazorpaySignature));
+
+            if (verification == CheckoutVerification.NotVerifiable)
+            {
+                // An OAuth connection: we hold no signing secret for this merchant, by design.
+                // The provider lookup below is then not a corroboration but the whole proof, and
+                // it is a sound one — it asks Razorpay directly, with the merchant's own token,
+                // what happened to this payment id.
+                _logger.LogInformation(
+                    "Checkout signature for invoice {InvoiceId} cannot be verified locally; " +
+                    "confirming with the provider instead", invoice.Id);
+            }
         }
         catch (PaymentSignatureException ex)
         {
@@ -161,7 +184,14 @@ public class PublicInvoiceService : IPublicInvoiceService
         PaymentOutcome outcome;
         try
         {
-            outcome = await _provider.GetPaymentAsync(request.RazorpayPaymentId, ct);
+            outcome = await _provider.GetPaymentAsync(merchant, request.RazorpayPaymentId, ct);
+        }
+        catch (PaymentCredentialException ex)
+        {
+            _logger.LogWarning(ex,
+                "Razorpay refused the credentials of merchant {UserId} while confirming a payment", invoice.UserId);
+            throw new ApiException(System.Net.HttpStatusCode.BadGateway,
+                "We could not confirm this payment yet. It will be updated automatically once the provider confirms it.");
         }
         catch (PaymentProviderException ex)
         {
@@ -186,7 +216,7 @@ public class PublicInvoiceService : IPublicInvoiceService
         // One shared path into the database, used by the webhook too. The outcome is passed
         // through exactly as the provider stated it — no field is substituted with a value the
         // browser supplied.
-        var payment = await _payments.ProcessOutcomeAsync(outcome, ct);
+        var payment = await _payments.ProcessOutcomeAsync(outcome, merchant, ct);
 
         var summary = await _payments.GetSummaryAsync(invoice.Id, ct);
 
@@ -254,6 +284,11 @@ public class PublicInvoiceService : IPublicInvoiceService
     {
         var business = await LoadBusinessAsync(invoice.UserId, ct);
         var summary = await _payments.GetSummaryAsync(invoice.Id, ct);
+
+        // Whether THIS business can be paid online, not whether Quotely can. TryResolve rather
+        // than Resolve: a business with no payment connection is an ordinary state to render, not
+        // an error to throw at a customer who only wanted to read their invoice.
+        var canPayOnline = await _merchants.TryResolveAsync(invoice.UserId, ct) is not null;
 
         // THE RULE, as InvoiceLedger states it: captured and not voided. The summary above already
         // excludes voided rows, so listing them here would show a customer payments that visibly
@@ -325,9 +360,10 @@ public class PublicInvoiceService : IPublicInvoiceService
             IsOverdue = invoice.IsOverdue(Today),
             Paid = summary.Paid,
             Outstanding = summary.Outstanding,
-            // Payments also require the provider to be configured; otherwise the page shows the
-            // balance without offering a button that cannot work.
-            CanPay = summary.CanPay && _provider.IsConfigured,
+            // Paying online also requires THIS business to have connected its own payment
+            // account. Without that the page shows the balance and the bank details the business
+            // put on the invoice, rather than a Pay button that would fail when pressed.
+            CanPay = summary.CanPay && canPayOnline,
             HasPendingPayment = summary.HasPendingPayment,
             Payments = settled
         };

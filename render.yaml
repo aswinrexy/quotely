@@ -43,14 +43,58 @@ services:
       - key: JWT__AUDIENCE
         value: QuotelyWeb
 
-      # ---- payments ----
-      # Razorpay TEST mode for the first public deployment. Going Live is a separate, deliberate
-      # step: replace these three values and nothing else.
+      # ---- merchant credential encryption ----
+      # Protects the Razorpay credentials each business entrusts to us, at rest. 32 random bytes,
+      # base64: `openssl rand -base64 32`. Production refuses to start without it, because a
+      # deployment that cannot encrypt a merchant's key secret must not be storing one.
+      #
+      # Rotating it: move the current value to Encryption__PreviousKeys__0 and set a new
+      # Encryption__Key. Existing rows still decrypt — each ciphertext names the key that wrote it.
+      - key: Encryption__Key
+        sync: false
+
+      # ---- QUOTELY'S OWN Razorpay account ----
+      # These collect the ₹150/month SaaS subscription from businesses using Quotely. They are NOT
+      # used to collect invoice payments: that money belongs to the business and is collected with
+      # the business's own credentials, from MerchantPaymentConnection. See docs/razorpay-partner.md.
+      #
+      # Mode is explicit rather than inferred from the key prefix. Production refuses to start when
+      # the two disagree, in either direction — a live key in a test deployment is refused just as
+      # firmly as a test key in a live one.
+      - key: Razorpay__Mode
+        value: Test
       - key: Razorpay__KeyId
         sync: false
       - key: Razorpay__KeySecret
         sync: false
+      # Signs Quotely's SUBSCRIPTION webhooks, delivered to /api/webhooks/razorpay/billing.
+      # Merchant payment webhooks do not use this: each business's connection has its own secret.
       - key: Razorpay__WebhookSecret
+        sync: false
+
+      # ---- Razorpay Technology Partner OAuth (not yet available) ----
+      # Empty until Razorpay approves the partner application. While empty, "Connect with Razorpay"
+      # is reported unavailable and businesses connect with their own API keys instead — nothing is
+      # stubbed. See docs/razorpay-partner.md for the exact onboarding steps.
+      - key: Razorpay__Oauth__ClientId
+        sync: false
+      - key: Razorpay__Oauth__ClientSecret
+        sync: false
+      - key: Razorpay__Oauth__RedirectUri
+        sync: false
+
+      # ---- Quotely's own subscription billing ----
+      # Off by default. A deployment that has not decided to charge anybody creates no mandates and
+      # locks nobody out. Enforcement is a second, separate switch, so billing can be introduced
+      # before the day an expired account first loses the ability to create an invoice.
+      - key: Billing__Enabled
+        value: "false"
+      - key: Billing__EnforceEntitlements
+        value: "false"
+
+      # ---- internal overview ----
+      # Email addresses allowed to read /api/admin/billing/accounts. Empty means nobody.
+      - key: Admin__Emails__0
         sync: false
 
       # ---- the customer-facing site ----

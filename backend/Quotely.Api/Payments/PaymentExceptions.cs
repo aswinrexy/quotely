@@ -14,3 +14,14 @@ public class PaymentSignatureException : Exception
 {
     public PaymentSignatureException(string message) : base(message) { }
 }
+
+/// <summary>
+/// The merchant's credentials were refused, or are missing. Separated from
+/// <see cref="PaymentProviderException"/> because the two call for opposite responses: a provider
+/// hiccup should be retried, whereas a rejected credential should stop the retries and mark the
+/// connection as needing attention.
+/// </summary>
+public class PaymentCredentialException : Exception
+{
+    public PaymentCredentialException(string message, Exception? inner = null) : base(message, inner) { }
+}

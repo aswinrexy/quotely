@@ -9,14 +9,26 @@ namespace Quotely.Api.Services;
 
 public interface IPaymentService
 {
-    /// <summary>Creates, or safely reuses, a provider order for the invoice's outstanding balance.</summary>
-    Task<(Payment Payment, ProviderOrder Order)> StartPaymentAsync(Invoice invoice, CancellationToken ct = default);
+    /// <summary>
+    /// Creates, or safely reuses, a provider order for the invoice's outstanding balance, using
+    /// the credentials of the merchant that owns the invoice.
+    ///
+    /// The merchant is a required parameter and there is no overload without one. That is what
+    /// makes "collect this into the wrong account" unrepresentable rather than merely unlikely.
+    /// </summary>
+    Task<(Payment Payment, ProviderOrder Order)> StartPaymentAsync(
+        Invoice invoice, MerchantPaymentContext merchant, CancellationToken ct = default);
 
     /// <summary>
     /// The one path by which a provider outcome becomes money in our database. Both checkout
     /// verification and webhook processing call this and nothing else.
+    ///
+    /// <paramref name="merchant"/> is the connection the outcome arrived through. The payment it
+    /// resolves to must belong to that connection's tenant, or it is refused: this is what stops
+    /// a webhook delivered for Business A from settling Business B's invoice.
     /// </summary>
-    Task<Payment> ProcessOutcomeAsync(PaymentOutcome outcome, CancellationToken ct = default);
+    Task<Payment> ProcessOutcomeAsync(
+        PaymentOutcome outcome, MerchantPaymentContext merchant, CancellationToken ct = default);
 
     /// <summary>
     /// Records money the business received outside the gateway. The second way into the ledger,
@@ -54,10 +66,10 @@ public class PaymentService : IPaymentService
     private static readonly TimeSpan AuthorisedReservationWindow = TimeSpan.FromHours(24);
 
     private readonly AppDbContext _db;
-    private readonly IPaymentProvider _provider;
+    private readonly IMerchantPaymentProvider _provider;
     private readonly ILogger<PaymentService> _logger;
 
-    public PaymentService(AppDbContext db, IPaymentProvider provider, ILogger<PaymentService> logger)
+    public PaymentService(AppDbContext db, IMerchantPaymentProvider provider, ILogger<PaymentService> logger)
     {
         _db = db;
         _provider = provider;
@@ -66,11 +78,15 @@ public class PaymentService : IPaymentService
 
     // ---- starting a payment --------------------------------------------
 
-    public async Task<(Payment Payment, ProviderOrder Order)> StartPaymentAsync(Invoice invoice, CancellationToken ct = default)
+    public async Task<(Payment Payment, ProviderOrder Order)> StartPaymentAsync(
+        Invoice invoice, MerchantPaymentContext merchant, CancellationToken ct = default)
     {
-        if (!_provider.IsConfigured)
-            throw new ApiException(System.Net.HttpStatusCode.ServiceUnavailable,
-                "Online payments are not available at the moment. Please contact the business.");
+        // The merchant was resolved from the invoice's own tenant, but saying so once here means
+        // a future caller that resolves it from anywhere else fails loudly instead of quietly
+        // collecting one business's money into another's account.
+        if (merchant.UserId != invoice.UserId)
+            throw new InvalidOperationException(
+                $"Invoice {invoice.Id} belongs to {invoice.UserId} but was given a payment connection for {merchant.UserId}.");
 
         if (!invoice.AcceptsPayments)
             throw ApiException.Conflict(InvoiceNotPayableMessage(invoice));
@@ -134,6 +150,9 @@ public class PaymentService : IPaymentService
                 Currency = invoice.Currency,
                 Status = PaymentStatus.Created,
                 Provider = _provider.Name,
+                // Which account is collecting this. Traceable afterwards, and checked on the way
+                // back in when a webhook claims to be about this payment.
+                MerchantConnectionId = merchant.ConnectionId,
                 // Taking the slot is what reserves the balance against a concurrent attempt.
                 ReservationSlot = invoice.Id,
                 CustomerName = invoice.CustomerName,
@@ -144,7 +163,17 @@ public class PaymentService : IPaymentService
             try
             {
                 order = await _provider.CreateOrderAsync(
+                    merchant,
                     new CreateOrderRequest(outstanding, invoice.Currency, invoice.InvoiceNumber, payment.Id), ct);
+            }
+            catch (PaymentCredentialException ex)
+            {
+                // The merchant's own credentials were refused. Not a transient provider failure
+                // and not something a retry fixes — the business has to reconnect their account.
+                _logger.LogWarning(ex,
+                    "Razorpay refused the credentials of merchant {UserId} while starting a payment", invoice.UserId);
+                throw new ApiException(System.Net.HttpStatusCode.ServiceUnavailable,
+                    "This business cannot accept online payments at the moment. Please contact them.");
             }
             catch (PaymentProviderException ex)
             {
@@ -237,7 +266,8 @@ public class PaymentService : IPaymentService
     /// unique index, so two callers racing — a webhook and a checkout callback, say — end with
     /// one payment record and one set of totals.
     /// </summary>
-    public async Task<Payment> ProcessOutcomeAsync(PaymentOutcome outcome, CancellationToken ct = default)
+    public async Task<Payment> ProcessOutcomeAsync(
+        PaymentOutcome outcome, MerchantPaymentContext merchant, CancellationToken ct = default)
     {
         if (string.IsNullOrWhiteSpace(outcome.ProviderPaymentId))
             throw ApiException.BadRequest("The payment reference was missing.");
@@ -250,7 +280,10 @@ public class PaymentService : IPaymentService
                 .FirstOrDefaultAsync(p => p.ProviderPaymentId == outcome.ProviderPaymentId, ct);
 
             if (existing is not null)
+            {
+                EnsureBelongsToMerchant(existing, merchant);
                 return await ApplyOutcomeAsync(existing, outcome, ct);
+            }
 
             // No record of this payment yet: attach it to the order we created for it. Claiming
             // an unused row keeps one attempt per order; a retry on the same order gets its own.
@@ -268,8 +301,14 @@ public class PaymentService : IPaymentService
                 throw ApiException.NotFound("Payment");
             }
 
-            var claimable = order.FirstOrDefault(p => p.ProviderPaymentId is null);
             var template = order[0];
+
+            // THE cross-tenant check. A Razorpay order id is globally unique but arrives from an
+            // untrusted delivery, so finding a row that matches it proves nothing about who the
+            // delivery came from. This proves it.
+            EnsureBelongsToMerchant(template, merchant);
+
+            var claimable = order.FirstOrDefault(p => p.ProviderPaymentId is null);
 
             if (claimable is null)
             {
@@ -283,6 +322,7 @@ public class PaymentService : IPaymentService
                     Currency = template.Currency,
                     Provider = template.Provider,
                     ProviderOrderId = template.ProviderOrderId,
+                    MerchantConnectionId = template.MerchantConnectionId,
                     Status = PaymentStatus.Created,
                     // Not a reservation: this row is being created to record an outcome that has
                     // already happened, not to hold the balance for a future attempt.
@@ -316,6 +356,28 @@ public class PaymentService : IPaymentService
                 return winner;
             }
         });
+    }
+
+    /// <summary>
+    /// Refuses to let one merchant's provider event touch another merchant's payment.
+    ///
+    /// The tenant is what is compared, not the connection id: a business that reconnects their
+    /// Razorpay account gets a new connection row, and a webhook for a payment started under the
+    /// old one is still legitimately theirs. What must never happen is Business A's delivery
+    /// settling Business B's invoice, and that is exactly what the tenant comparison prevents.
+    /// </summary>
+    private void EnsureBelongsToMerchant(Payment payment, MerchantPaymentContext merchant)
+    {
+        if (payment.UserId == merchant.UserId) return;
+
+        _logger.LogError(
+            "Refused a cross-tenant payment outcome: payment {PaymentId} belongs to {OwnerId} but arrived " +
+            "through the connection of {MerchantId}",
+            payment.Id, payment.UserId, merchant.UserId);
+
+        // NotFound rather than Forbidden, matching how the rest of the application answers a
+        // request about somebody else's data: a 403 would confirm the payment exists.
+        throw ApiException.NotFound("Payment");
     }
 
     /// <summary>

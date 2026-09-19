@@ -86,14 +86,23 @@ public class PaymentApiTests : IClassFixture<QuotelyApiFactory>
             razorpaySignature = signature ?? FakePaymentProvider.CheckoutSignature(orderId, paymentId)
         });
 
-    private static Task<HttpResponseMessage> WebhookAsync(HttpClient client, string body, string? eventId,
+    /// <summary>
+    /// Delivers a webhook to the business's OWN endpoint, signed with its OWN secret — both read
+    /// from the connection made when the client signed in. There is no shared webhook URL or
+    /// shared secret any more, so a test cannot accidentally address the wrong merchant.
+    /// </summary>
+    private Task<HttpResponseMessage> WebhookAsync(HttpClient client, string body, string? eventId,
         string? signature = null)
     {
-        var request = new HttpRequestMessage(HttpMethod.Post, "/api/webhooks/razorpay")
+        var connection = _factory.ConnectionFor(client);
+
+        var request = new HttpRequestMessage(HttpMethod.Post, connection.WebhookUrl)
         {
             Content = new StringContent(body, Encoding.UTF8, "application/json")
         };
-        request.Headers.Add("X-Razorpay-Signature", signature ?? FakePaymentProvider.WebhookSignature(body));
+        request.Headers.Add(
+            "X-Razorpay-Signature",
+            signature ?? FakePaymentProvider.WebhookSignature(body, connection.WebhookSecret));
         if (eventId is not null) request.Headers.Add("X-Razorpay-Event-Id", eventId);
         return client.SendAsync(request);
     }
@@ -280,7 +289,7 @@ public class PaymentApiTests : IClassFixture<QuotelyApiFactory>
         // The secret is nowhere near the response.
         (await response.Content.ReadAsStringAsync())
             .Should().NotContain(FakePaymentProvider.TestKeySecret)
-            .And.NotContain(FakePaymentProvider.TestWebhookSecret);
+            .And.NotContain(_factory.ConnectionFor(client).WebhookSecret);
     }
 
     [Fact]
@@ -555,7 +564,7 @@ public class PaymentApiTests : IClassFixture<QuotelyApiFactory>
         var body = FakePaymentProvider.WebhookBody(
             "payment.captured", "pay_hook_1", order.OrderId, "captured", order.Amount);
 
-        var response = await WebhookAsync(anonymous, body, "evt_hook_1");
+        var response = await WebhookAsync(client, body, "evt_hook_1");
 
         response.StatusCode.Should().Be(HttpStatusCode.OK);
         var summary = await client.GetFromJsonAsync<InvoicePaymentsDto>($"/api/invoices/{invoice.Id}/payments");
@@ -575,7 +584,7 @@ public class PaymentApiTests : IClassFixture<QuotelyApiFactory>
         var body = FakePaymentProvider.WebhookBody(
             "payment.captured", "pay_forged_hook", order.OrderId, "captured", order.Amount);
 
-        var response = await WebhookAsync(anonymous, body, "evt_forged", signature: "not-a-signature");
+        var response = await WebhookAsync(client, body, "evt_forged", signature: "not-a-signature");
 
         response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
         (await client.GetFromJsonAsync<InvoicePaymentsDto>($"/api/invoices/{invoice.Id}/payments"))!
@@ -595,7 +604,7 @@ public class PaymentApiTests : IClassFixture<QuotelyApiFactory>
             "payment.captured", "pay_dup", order.OrderId, "captured", order.Amount);
 
         for (var i = 0; i < 3; i++)
-            (await WebhookAsync(anonymous, body, "evt_dup")).StatusCode.Should().Be(HttpStatusCode.OK);
+            (await WebhookAsync(client, body, "evt_dup")).StatusCode.Should().Be(HttpStatusCode.OK);
 
         var summary = await client.GetFromJsonAsync<InvoicePaymentsDto>($"/api/invoices/{invoice.Id}/payments");
         summary!.Summary.Paid.Should().Be(10000m);
@@ -613,10 +622,10 @@ public class PaymentApiTests : IClassFixture<QuotelyApiFactory>
 
         var order = (await (await CreateOrderAsync(anonymous, token)).Content.ReadFromJsonAsync<PaymentOrderDto>())!;
 
-        await WebhookAsync(anonymous,
+        await WebhookAsync(client,
             FakePaymentProvider.WebhookBody("payment.captured", "pay_same", order.OrderId, "captured", order.Amount),
             "evt_captured");
-        await WebhookAsync(anonymous,
+        await WebhookAsync(client,
             FakePaymentProvider.WebhookBody("order.paid", "pay_same", order.OrderId, "captured", order.Amount),
             "evt_order_paid");
 
@@ -636,10 +645,10 @@ public class PaymentApiTests : IClassFixture<QuotelyApiFactory>
         var order = (await (await CreateOrderAsync(anonymous, token)).Content.ReadFromJsonAsync<PaymentOrderDto>())!;
 
         // Razorpay does not guarantee ordering: captured arrives first, authorized second.
-        await WebhookAsync(anonymous,
+        await WebhookAsync(client,
             FakePaymentProvider.WebhookBody("payment.captured", "pay_ooo", order.OrderId, "captured", order.Amount),
             "evt_ooo_captured");
-        await WebhookAsync(anonymous,
+        await WebhookAsync(client,
             FakePaymentProvider.WebhookBody("payment.authorized", "pay_ooo", order.OrderId, "authorized", order.Amount),
             "evt_ooo_authorized");
 
@@ -661,7 +670,7 @@ public class PaymentApiTests : IClassFixture<QuotelyApiFactory>
         _factory.Payments.Arrange("pay_both", order.OrderId, PaymentStatus.Captured, order.Amount);
 
         // Both confirmation paths run for the same payment, in the worst order.
-        await WebhookAsync(anonymous,
+        await WebhookAsync(client,
             FakePaymentProvider.WebhookBody("payment.captured", "pay_both", order.OrderId, "captured", order.Amount),
             "evt_both");
         var verified = (await (await VerifyAsync(anonymous, token, order.OrderId, "pay_both"))
@@ -684,7 +693,7 @@ public class PaymentApiTests : IClassFixture<QuotelyApiFactory>
             "payment.captured", "pay_stranger", "order_not_ours", "captured", 500000);
 
         // Acknowledged so the provider stops retrying, but no money is attributed to anyone.
-        (await WebhookAsync(anonymous, body, "evt_stranger")).StatusCode.Should().Be(HttpStatusCode.OK);
+        (await WebhookAsync(client, body, "evt_stranger")).StatusCode.Should().Be(HttpStatusCode.OK);
 
         (await client.GetFromJsonAsync<InvoicePaymentsDto>($"/api/invoices/{invoice.Id}/payments"))!
             .Summary.Paid.Should().Be(0m);
@@ -702,7 +711,7 @@ public class PaymentApiTests : IClassFixture<QuotelyApiFactory>
         var body = FakePaymentProvider.WebhookBody(
             "payment.failed", "pay_hook_failed", order.OrderId, "failed", order.Amount);
 
-        (await WebhookAsync(anonymous, body, "evt_failed")).StatusCode.Should().Be(HttpStatusCode.OK);
+        (await WebhookAsync(client, body, "evt_failed")).StatusCode.Should().Be(HttpStatusCode.OK);
 
         var summary = await client.GetFromJsonAsync<InvoicePaymentsDto>($"/api/invoices/{invoice.Id}/payments");
         summary!.Summary.Paid.Should().Be(0m);
@@ -713,10 +722,30 @@ public class PaymentApiTests : IClassFixture<QuotelyApiFactory>
     [Fact]
     public async Task The_webhook_endpoint_needs_no_token_and_never_uses_one()
     {
-        // It is anonymous to our JWT scheme and authenticated only by its signature.
-        var response = await WebhookAsync(_factory.CreateClient(), "{\"event\":\"ping\"}", "evt_ping");
+        // It is anonymous to our JWT scheme and authenticated only by its signature — the
+        // delivery in WebhookAsync is sent by a client carrying no bearer token at all.
+        var client = await _factory.CreateSignedInClientAsync();
+
+        var response = await WebhookAsync(client, "{\"event\":\"ping\"}", "evt_ping");
 
         response.StatusCode.Should().Be(HttpStatusCode.OK);
+    }
+
+    [Fact]
+    public async Task A_webhook_delivered_to_an_unknown_address_is_rejected()
+    {
+        // The route token is what selects the merchant. One that matches nothing must be refused
+        // outright rather than falling back to some default account.
+        var request = new HttpRequestMessage(
+            HttpMethod.Post, "/api/webhooks/razorpay/m/there-is-no-connection-with-this-token")
+        {
+            Content = new StringContent("{\"event\":\"ping\"}", Encoding.UTF8, "application/json")
+        };
+        request.Headers.Add("X-Razorpay-Signature", "irrelevant");
+
+        var response = await _factory.CreateClient().SendAsync(request);
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
     }
 
     // ---- partial payments and the derived balance -------------------------
@@ -815,13 +844,13 @@ public class PaymentApiTests : IClassFixture<QuotelyApiFactory>
         var order = (await (await CreateOrderAsync(anonymous, token)).Content.ReadFromJsonAsync<PaymentOrderDto>())!;
 
         // One captured, one pending, one failed. Only the captured one may count.
-        await WebhookAsync(anonymous,
+        await WebhookAsync(client,
             FakePaymentProvider.WebhookBody("payment.captured", "pay_sum_ok", order.OrderId, "captured", order.Amount),
             "evt_sum_1");
-        await WebhookAsync(anonymous,
+        await WebhookAsync(client,
             FakePaymentProvider.WebhookBody("payment.authorized", "pay_sum_pending", order.OrderId, "authorized", order.Amount),
             "evt_sum_2");
-        await WebhookAsync(anonymous,
+        await WebhookAsync(client,
             FakePaymentProvider.WebhookBody("payment.failed", "pay_sum_failed", order.OrderId, "failed", order.Amount),
             "evt_sum_3");
 
@@ -858,7 +887,7 @@ public class PaymentApiTests : IClassFixture<QuotelyApiFactory>
         var anonymous = _factory.CreateClient();
 
         var order = (await (await CreateOrderAsync(anonymous, token)).Content.ReadFromJsonAsync<PaymentOrderDto>())!;
-        await WebhookAsync(anonymous,
+        await WebhookAsync(client,
             FakePaymentProvider.WebhookBody("payment.captured", "pay_history", order.OrderId, "captured", order.Amount),
             "evt_history");
 
@@ -874,7 +903,7 @@ public class PaymentApiTests : IClassFixture<QuotelyApiFactory>
 
         (await response.Content.ReadAsStringAsync())
             .Should().NotContain(FakePaymentProvider.TestKeySecret)
-            .And.NotContain(FakePaymentProvider.TestWebhookSecret);
+            .And.NotContain(_factory.ConnectionFor(client).WebhookSecret);
     }
 
     // ---- pdf --------------------------------------------------------------

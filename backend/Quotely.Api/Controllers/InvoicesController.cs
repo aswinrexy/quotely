@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Quotely.Api.Data;
 using Quotely.Api.DTOs;
+using Quotely.Api.Billing;
 using Quotely.Api.Services;
 
 namespace Quotely.Api.Controllers;
@@ -54,6 +55,10 @@ public class InvoicesController : ControllerBase
     /// the same numbering sequence, lifecycle, PDF, payment link and payment flow as one converted
     /// from a quotation. The customer must belong to the caller.
     /// </summary>
+    /// <summary>Gated on the subscription; see the note on QuotationsController.Create.</summary>
+    [RequiresEntitlement(
+        Entitlement.CreateInvoice,
+        "Your Quotely subscription has ended. You can still view and export everything you have, and start again from Billing.")]
     [HttpPost]
     [ProducesResponseType(typeof(InvoiceDto), StatusCodes.Status201Created)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]

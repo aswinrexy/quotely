@@ -63,6 +63,14 @@ export const Icon = {
       <path d="M7.5 8.5h3M7.5 12.5h3M7.5 16.5h3M17 14.5h0M17 18h0" />
     </Svg>
   ),
+  /** A payment card. Used for the business's own payment-account settings. */
+  card: (p: IconProps) => (
+    <Svg {...p}>
+      <rect x="2.5" y="5" width="19" height="14" rx="2" />
+      <path d="M2.5 10h19" />
+      <path d="M6 14.5h3" />
+    </Svg>
+  ),
   settings: (p: IconProps) => (
     <Svg {...p}>
       <circle cx="12" cy="12" r="3" />

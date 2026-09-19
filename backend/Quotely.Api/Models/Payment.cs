@@ -40,6 +40,16 @@ public class Payment
     public string Provider { get; set; } = PaymentProviders.Razorpay;
 
     /// <summary>
+    /// Which merchant payment connection collected this money — a reference, never a copy of the
+    /// credentials. Null for a manual payment, and for gateway rows written before V2.7 when
+    /// there was only one account to collect into.
+    ///
+    /// Recorded so a payment can be traced to the account that actually holds it, and so a
+    /// webhook can be refused when it names a payment belonging to a different connection.
+    /// </summary>
+    public Guid? MerchantConnectionId { get; set; }
+
+    /// <summary>
     /// The provider's order identifier. Indexed, not unique: one order may be retried.
     ///
     /// Null for a manual payment, because there genuinely is no provider order behind a handful

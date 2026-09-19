@@ -568,3 +568,104 @@ export interface CustomerSummary {
   currency: string;
   invoices: PagedResult<InvoiceListItem>;
 }
+
+// ---- payments: the business's own Razorpay account -------------------------
+
+export type MerchantConnectionStatus =
+  | "Disconnected"
+  | "Connected"
+  | "Error"
+  | "Expired"
+  | "Pending";
+
+export type MerchantConnectionMode = "KeyPair" | "Oauth";
+
+export type PaymentEnvironment = "Test" | "Live";
+
+/**
+ * What the API is willing to tell an owner about their payment connection.
+ *
+ * Note what is absent and always will be: the key secret, the OAuth tokens, and the connection's
+ * own row id. `webhookSecret` is the single exception — it is present in the response that
+ * creates it and null on every read afterwards, because only the encrypted form is kept.
+ */
+export interface MerchantConnection {
+  provider: string;
+  status: MerchantConnectionStatus;
+  mode?: MerchantConnectionMode | null;
+  environment: PaymentEnvironment;
+  /** An acc_ identifier or a truncated publishable key — never a secret. */
+  accountLabel?: string | null;
+  displayName?: string | null;
+  statusMessage?: string | null;
+  connectedAt?: string | null;
+  disconnectedAt?: string | null;
+  lastVerifiedAt?: string | null;
+  accessTokenExpiresAt?: string | null;
+  /** The one question the invoice page asks. */
+  canAcceptPayments: boolean;
+  /** False until Quotely is an approved Razorpay Technology Partner. */
+  oauthAvailable: boolean;
+  keyPairAvailable: boolean;
+  webhookUrl?: string | null;
+  /** Shown once, at creation. Null forever after. */
+  webhookSecret?: string | null;
+}
+
+export interface MerchantConnectionStart {
+  authorizationUrl: string;
+  state: string;
+}
+
+// ---- billing: what this business pays Quotely ------------------------------
+
+export type SubscriptionStatus = "Trialing" | "Active" | "PastDue" | "Cancelled" | "Expired";
+
+/**
+ * The business's own subscription to Quotely. Note what is absent: no Razorpay subscription id,
+ * no plan id, no key. The owner is told what they pay and when, not how we integrate.
+ */
+export interface Subscription {
+  planCode: string;
+  planName: string;
+  planDescription?: string | null;
+  price: number;
+  currency: string;
+  interval: string;
+
+  status: SubscriptionStatus;
+  statusMessage?: string | null;
+
+  trialStart?: string | null;
+  trialEnd?: string | null;
+  inTrial: boolean;
+
+  currentPeriodStart?: string | null;
+  currentPeriodEnd?: string | null;
+
+  cancelRequestedAt?: string | null;
+  cancelledAt?: string | null;
+  lastPaymentAt?: string | null;
+
+  hasActiveMandate: boolean;
+  hasAccess: boolean;
+  accessEndsAt?: string | null;
+  nextPaymentAt?: string | null;
+
+  /** False when this deployment does not charge for anything. */
+  billingEnabled: boolean;
+
+  couponCode?: string | null;
+  couponRedeemedAt?: string | null;
+  couponFreeMonths?: number | null;
+}
+
+export interface SubscriptionCheckout {
+  keyId: string;
+  subscriptionId: string;
+  planName: string;
+  price: number;
+  currency: string;
+  firstChargeAt?: string | null;
+  shortUrl?: string | null;
+}

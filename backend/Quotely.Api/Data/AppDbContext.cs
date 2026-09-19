@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Identity.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Quotely.Api.Models;
+using Quotely.Api.Services;
 
 namespace Quotely.Api.Data;
 
@@ -19,6 +20,13 @@ public class AppDbContext : IdentityDbContext<AppUser, IdentityRole<Guid>, Guid>
     public DbSet<InvoiceItem> InvoiceItems => Set<InvoiceItem>();
     public DbSet<Payment> Payments => Set<Payment>();
     public DbSet<WebhookEvent> WebhookEvents => Set<WebhookEvent>();
+    public DbSet<MerchantPaymentConnection> MerchantPaymentConnections => Set<MerchantPaymentConnection>();
+
+    // ---- Quotely's own SaaS billing. A different kind of money from everything above: these
+    // ---- are businesses paying US, not customers paying them.
+    public DbSet<Subscription> Subscriptions => Set<Subscription>();
+    public DbSet<Coupon> Coupons => Set<Coupon>();
+    public DbSet<CouponRedemption> CouponRedemptions => Set<CouponRedemption>();
 
     /// <summary>
     /// Neither SQL Server's datetime2 nor SQLite stores a timezone, so values read back arrive as
@@ -195,6 +203,8 @@ public class AppDbContext : IdentityDbContext<AppUser, IdentityRole<Guid>, Guid>
             // Reading the ledger always asks for captured, non-voided rows on one invoice, so the
             // existing (InvoiceId, Status) index is extended to cover the void check too.
             e.HasIndex(x => new { x.InvoiceId, x.Status, x.VoidedAt });
+            // Which account collected what, for reconciliation and for the admin view.
+            e.HasIndex(x => x.MerchantConnectionId);
             e.Property(x => x.CustomerName).HasMaxLength(200);
             e.Property(x => x.CustomerEmail).HasMaxLength(256);
             e.Property(x => x.FailureReason).HasMaxLength(500);
@@ -207,16 +217,110 @@ public class AppDbContext : IdentityDbContext<AppUser, IdentityRole<Guid>, Guid>
                 .HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.NoAction);
         });
 
+        b.Entity<MerchantPaymentConnection>(e =>
+        {
+            // One payment account per business per provider. Enforced by the database so two
+            // simultaneous "connect" requests cannot leave a tenant with two connections, of
+            // which one would silently never be used.
+            e.HasIndex(x => new { x.UserId, x.Provider }).IsUnique();
+
+            // How a webhook delivery finds its connection. Unique because it is an identifier,
+            // and indexed because every delivery is a lookup on it.
+            e.HasIndex(x => x.WebhookRouteToken).IsUnique();
+
+            // Answering "which businesses can take payments?" for the admin view without reading
+            // every row and decrypting nothing.
+            e.HasIndex(x => new { x.Provider, x.Status });
+
+            e.Property(x => x.Provider).HasMaxLength(30).IsRequired();
+            e.Property(x => x.ProviderAccountId).HasMaxLength(60);
+            e.Property(x => x.PublicKey).HasMaxLength(120);
+            e.Property(x => x.DisplayName).HasMaxLength(100);
+            e.Property(x => x.StatusMessage).HasMaxLength(300);
+            e.Property(x => x.WebhookRouteToken).HasMaxLength(64).IsRequired();
+            e.Property(x => x.OauthStateHash).HasMaxLength(PublicTokenGenerator.HashLength);
+
+            // Ciphertext is longer than the plaintext it protects — a nonce, a tag and base64
+            // expansion on top of the secret — so these are sized generously rather than to the
+            // length of a Razorpay key.
+            e.Property(x => x.KeySecretCipher).HasMaxLength(1024);
+            e.Property(x => x.AccessTokenCipher).HasMaxLength(4096);
+            e.Property(x => x.RefreshTokenCipher).HasMaxLength(4096);
+            e.Property(x => x.WebhookSecretCipher).HasMaxLength(1024);
+
+            e.Property(x => x.ConcurrencyStamp).IsConcurrencyToken();
+
+            e.HasOne(x => x.User).WithMany()
+                .HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        b.Entity<Subscription>(e =>
+        {
+            // One subscription per business. Enforced by the database so two requests from a new
+            // account cannot each create a trial.
+            e.HasIndex(x => x.UserId).IsUnique();
+
+            // How a billing webhook finds the subscription it is about.
+            e.HasIndex(x => x.ProviderSubscriptionId).IsUnique();
+
+            // "Whose access is about to lapse?" — the query a reconciliation pass would run.
+            e.HasIndex(x => new { x.Status, x.TrialEnd });
+
+            e.Property(x => x.PlanCode).HasMaxLength(40).IsRequired();
+            e.Property(x => x.Currency).HasMaxLength(3).IsRequired();
+            e.Property(x => x.Provider).HasMaxLength(30).IsRequired();
+            e.Property(x => x.ProviderSubscriptionId).HasMaxLength(80);
+            e.Property(x => x.ProviderPlanId).HasMaxLength(80);
+            e.Property(x => x.StatusMessage).HasMaxLength(300);
+            e.Property(x => x.Price).HasPrecision(18, 2);
+            e.Property(x => x.ConcurrencyStamp).IsConcurrencyToken();
+
+            e.HasOne(x => x.User).WithOne()
+                .HasForeignKey<Subscription>(x => x.UserId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        b.Entity<Coupon>(e =>
+        {
+            // The lookup key, and the guarantee that one code means one coupon.
+            e.HasIndex(x => x.Code).IsUnique();
+            e.Property(x => x.Code).HasMaxLength(40).IsRequired();
+            e.Property(x => x.Description).HasMaxLength(200).IsRequired();
+            e.Property(x => x.ConcurrencyStamp).IsConcurrencyToken();
+        });
+
+        b.Entity<CouponRedemption>(e =>
+        {
+            // ONE REDEMPTION PER ACCOUNT, enforced here rather than by a service-level check.
+            // Two concurrent requests can both pass "have they already redeemed this?"; only one
+            // of them can win this insert.
+            e.HasIndex(x => new { x.CouponId, x.UserId }).IsUnique();
+            e.HasIndex(x => x.UserId);
+            e.Property(x => x.CodeUsed).HasMaxLength(40).IsRequired();
+
+            e.HasOne(x => x.Coupon).WithMany(c => c.Redemptions)
+                .HasForeignKey(x => x.CouponId).OnDelete(DeleteBehavior.Cascade);
+            e.HasOne(x => x.Subscription).WithMany(s => s.Redemptions)
+                .HasForeignKey(x => x.SubscriptionId).OnDelete(DeleteBehavior.Cascade);
+            // No second cascade path to AspNetUsers: SQL Server rejects multiple cascade routes,
+            // and a redemption already disappears with its subscription.
+            e.HasOne(x => x.User).WithMany()
+                .HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.NoAction);
+        });
+
         b.Entity<WebhookEvent>(e =>
         {
             // The idempotency key. A retried delivery fails this insert and is acknowledged
             // without being processed again.
             e.HasIndex(x => new { x.Provider, x.EventId }).IsUnique();
             e.Property(x => x.Provider).HasMaxLength(30).IsRequired();
-            e.Property(x => x.EventId).HasMaxLength(120).IsRequired();
             e.Property(x => x.EventType).HasMaxLength(80).IsRequired();
             e.Property(x => x.ProviderOrderId).HasMaxLength(80);
             e.Property(x => x.ProviderPaymentId).HasMaxLength(80);
+            // The connection-scoped event id is longer than a bare provider one, so the column
+            // grew with it. 120 would now truncate a legitimate key and turn two distinct events
+            // into an accidental duplicate.
+            e.Property(x => x.EventId).HasMaxLength(180).IsRequired();
+            e.HasIndex(x => new { x.UserId, x.ReceivedAt });
         });
 
         b.Entity<InvoiceItem>(e =>
