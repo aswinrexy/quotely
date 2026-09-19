@@ -2,6 +2,8 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { api } from "@/lib/api";
+import { useAuth } from "@/lib/auth";
+import { openSubscriptionCheckout } from "@/lib/razorpay";
 import { formatMoney } from "@/lib/format";
 import { useToast } from "@/components/ui/toast";
 import { Button } from "@/components/ui/button";
@@ -11,7 +13,7 @@ import { ConfirmDialog } from "@/components/ui/dialog";
 import { DetailSkeleton, ErrorState } from "@/components/ui/states";
 import { PageHeader } from "@/components/app/page-header";
 import { cn } from "@/lib/cn";
-import type { Subscription, SubscriptionStatus } from "@/types";
+import type { Subscription, SubscriptionCheckout, SubscriptionStatus } from "@/types";
 
 const ENDPOINT = "/api/billing/subscription";
 
@@ -73,7 +75,7 @@ export default function BillingSettingsPage() {
         {!subscription.couponCode && <CouponCard onRedeemed={setSubscription} />}
 
         {subscription.billingEnabled && !subscription.hasActiveMandate && (
-          <StartCard onStarted={load} />
+          <StartCard subscription={subscription} onFinished={setSubscription} />
         )}
 
         {subscription.hasActiveMandate && !subscription.cancelRequestedAt && (
@@ -167,6 +169,22 @@ function PlanCard({ subscription }: { subscription: Subscription }) {
           )}
           {subscription.accessEndsAt && (
             <Fact label="Access ends" value={date(subscription.accessEndsAt)} />
+          )}
+          {/*
+            Stated plainly, because "Quotely Pro" and "Free trial" together are easy to read as
+            "I already have Pro and something is paying for it". Nothing is, until this says so.
+          */}
+          {subscription.billingEnabled && (
+            <Fact
+              label="Payment method"
+              value={
+                subscription.hasActiveMandate ? (
+                  "Set up"
+                ) : (
+                  <span className="text-amber-ink">Not set up yet</span>
+                )
+              }
+            />
           )}
         </dl>
 
@@ -282,24 +300,68 @@ function CouponCard({ onRedeemed }: { onRedeemed: (subscription: Subscription) =
 
 // ---- starting to pay -------------------------------------------------------
 
-function StartCard({ onStarted }: { onStarted: () => void }) {
+/**
+ * Setting up the mandate that lets Quotely charge this business ₹150 a month.
+ *
+ * The money flow, stated once because it is easy to confuse with the other one: this payment
+ * goes from the business TO QUOTELY, collected with Quotely's own Razorpay account. It is not
+ * the flow in Settings → Payments, which is the business's customers paying THEM.
+ *
+ * Embedded checkout, not a redirect. Razorpay subscriptions take no callback_url, so sending
+ * someone to the hosted short_url strands them on Razorpay's page with nothing telling Quotely
+ * what happened. Here the signed result comes straight back and is handed to the server to
+ * verify. The hosted page remains the fallback for when the script cannot load at all.
+ */
+function StartCard({
+  subscription,
+  onFinished,
+}: {
+  subscription: Subscription;
+  onFinished: (subscription: Subscription) => void;
+}) {
   const toast = useToast();
+  const { user } = useAuth();
   const [busy, setBusy] = useState(false);
 
   async function start() {
     setBusy(true);
     try {
-      const checkout = await api.post<{ shortUrl?: string | null }>(ENDPOINT);
+      // The server creates the subscription at Razorpay and decides when billing starts — after
+      // the free period, including any months a coupon added. Nothing here sets a price.
+      const checkout = await api.post<SubscriptionCheckout>(ENDPOINT);
 
-      if (checkout.shortUrl) {
-        // Razorpay's own hosted authorisation page. Using it rather than embedding checkout means
-        // the mandate is set up on Razorpay's page, where the bank redirects land reliably.
-        window.location.href = checkout.shortUrl;
+      let outcome;
+      try {
+        outcome = await openSubscriptionCheckout(checkout, {
+          name: user?.fullName,
+          email: user?.email,
+        });
+      } catch {
+        // The checkout script could not load — an ad blocker, or no connection to Razorpay.
+        // The hosted page is the honest fallback rather than a dead button.
+        if (checkout.shortUrl) {
+          window.location.href = checkout.shortUrl;
+          return;
+        }
+        throw new Error("The payment window could not be opened. Please try again.");
+      }
+
+      if (outcome.dismissed) {
+        // Nothing was authorised and nothing charged. Not an error, so not an error message.
+        toast("No payment method was set up.", "info");
         return;
       }
 
-      onStarted();
-      toast("Your subscription has been set up.", "success");
+      if (outcome.failure || !outcome.result) {
+        toast(outcome.failure ?? "The payment method could not be set up.", "error");
+        return;
+      }
+
+      // Verified server-side against Razorpay's signature, then confirmed with Razorpay directly.
+      // The browser's word that it worked is never enough on its own.
+      const confirmed = await api.post<Subscription>(`${ENDPOINT}/confirm`, outcome.result);
+      onFinished(confirmed);
+      toast("Your payment method is set up.", "success");
     } catch (err) {
       toast(err instanceof Error ? err.message : "Could not set up your subscription.", "error");
     } finally {
@@ -307,14 +369,38 @@ function StartCard({ onStarted }: { onStarted: () => void }) {
     }
   }
 
+  const firstCharge = subscription.trialEnd ?? subscription.nextPaymentAt;
+
   return (
     <SectionCard
       title="Set up payment"
-      description="Nothing is charged until your free period ends. You can cancel at any time before then."
+      description="Authorise the monthly payment now. Nothing is taken until your free period ends, and you can cancel any time before then."
     >
-      <Button onClick={start} loading={busy}>
-        Set up payment
-      </Button>
+      <div className="space-y-4">
+        <Panel className="space-y-1 text-body text-steel">
+          <p>
+            You will be charged{" "}
+            <strong className="font-semibold text-charcoal">
+              {formatMoney(subscription.price, subscription.currency)} per month
+            </strong>
+            {firstCharge ? (
+              <>
+                , starting <strong className="font-semibold text-charcoal">{date(firstCharge)}</strong>.
+              </>
+            ) : (
+              "."
+            )}
+          </p>
+          <p>
+            Razorpay collects it automatically each month. You can cancel from this page at any
+            time, and you keep access until the end of the period you have paid for.
+          </p>
+        </Panel>
+
+        <Button onClick={start} loading={busy}>
+          Set up payment
+        </Button>
+      </div>
     </SectionCard>
   );
 }
