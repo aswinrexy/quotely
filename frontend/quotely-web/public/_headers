@@ -1,11 +1,30 @@
 # Security headers for the Quotely web app on Cloudflare Pages.
 #
 # The app holds a JWT and displays financial documents, so the cheap browser-side protections are
-# worth having. HSTS is not set here: Cloudflare already serves *.pages.dev over HTTPS only, and
-# committing to HSTS is a decision for a custom domain, not a platform subdomain.
+# worth having.
+#
+# Two of the values below are load-bearing and easy to get wrong:
+#
+# Permissions-Policy — payment= is delegated to Razorpay Checkout ON PURPOSE. Checkout runs in an
+# iframe and uses the Payment Request API for Google Pay and card autofill. A bare payment=()
+# disables that API for the page AND everything embedded in it, so Checkout still opens, still
+# looks correct, and simply cannot offer Google Pay. Nothing throws, so the first sign of trouble
+# is a customer who could not pay. Every other capability stays denied: this app has no use for a
+# camera, a microphone or a location, so nothing it embeds should be able to ask for one.
+#
+# Strict-Transport-Security — now that Quotely is served from a domain we own, and every host
+# under it is HTTPS-only (Cloudflare Pages for the site, Render for api.), committing to HTTPS is
+# safe. It was not while the app lived on a shared *.pages.dev. One year, and includeSubDomains so
+# api.quotely4you.org is covered too. Deliberately NOT preloaded: the preload list is baked into
+# browser binaries and removal takes months, which is not a commitment worth making for a product
+# this young.
+#
+# Comments live here rather than inside the rule block below, because the _headers format treats
+# every indented line in a block as a header.
 
 /*
   X-Content-Type-Options: nosniff
   Referrer-Policy: strict-origin-when-cross-origin
   X-Frame-Options: DENY
-  Permissions-Policy: camera=(), microphone=(), geolocation=(), payment=()
+  Permissions-Policy: camera=(), microphone=(), geolocation=(), payment=(self "https://checkout.razorpay.com" "https://api.razorpay.com")
+  Strict-Transport-Security: max-age=31536000; includeSubDomains

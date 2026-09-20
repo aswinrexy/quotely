@@ -174,7 +174,9 @@ public class FreeTierTests : IClassFixture<FreeTierFactory>
     [Fact]
     public async Task Products_stop_at_the_free_allowance()
     {
-        var client = await _factory.CreateSignedInClientAsync(connectPayments: false);
+        // No seeded catalogue entry: this test counts products against the allowance, so it has to
+        // start from an empty catalogue or the seed silently spends one of the two.
+        var client = await _factory.CreateSignedInClientAsync(connectPayments: false, seedCatalogue: false);
         await _factory.ExpireTrialAsync(client);
 
         for (var i = 0; i < FreeTierFactory.MaxProducts; i++)

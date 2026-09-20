@@ -23,12 +23,21 @@ import type { Customer, Invoice, PagedResult, Product } from "@/types";
  * the grand total and the invoice number — is recomputed by the server when the invoice is saved,
  * by the same calculator that converts an accepted quotation.
  *
- * Choosing a catalogue item fills the line in as a convenience. Nothing links the saved line back
- * to the product: an invoice line is a snapshot, so a later price change cannot restate it.
+ * Every line starts from the catalogue. That is a product decision, not a technical one: a business
+ * that types each line from scratch ends up with no catalogue, and the same service goes out at
+ * three different prices because nothing holds the number in one place.
+ *
+ * Choosing a catalogue item fills the line in. Nothing links the SAVED line back to the product:
+ * an invoice line is a snapshot, so a later price change cannot restate a bill already sent. The
+ * productId below exists only to drive this form — it is not sent to the server, and there is no
+ * column for it. Which is why the server can only enforce "the catalogue is not empty", and the
+ * per-line requirement is enforced here, where the person is choosing.
  */
 
 interface ItemRow {
   key: string;
+  /** Drives this form only. Never sent: an InvoiceItem has no ProductId by design. */
+  productId: string;
   name: string;
   description: string;
   unit: string;
@@ -41,6 +50,7 @@ interface ItemRow {
 function emptyRow(): ItemRow {
   return {
     key: crypto.randomUUID(),
+    productId: "",
     name: "",
     description: "",
     unit: "Service",
@@ -113,6 +123,7 @@ export function InvoiceForm({ initialCustomerId }: { initialCustomerId?: string 
     if (!product) return;
 
     updateRow(key, {
+      productId: product.id,
       name: product.name,
       description: product.description ?? "",
       unit: product.unit,
@@ -130,8 +141,17 @@ export function InvoiceForm({ initialCustomerId }: { initialCustomerId?: string 
       found.push("Due date must be on or after the invoice date.");
     if (rows.length === 0) found.push("Add at least one item.");
 
+    // Said once, not once per line. With nothing in the catalogue, telling someone to pick from it
+    // five times is noise — the one thing they can act on is adding the first product.
+    if (products.length === 0)
+      found.push("Add a product or service to your catalogue before creating an invoice.");
+
     rows.forEach((row, index) => {
       const label = row.name.trim() || `Item ${index + 1}`;
+      // Before the description check, because "pick a product" is the actionable instruction and
+      // a row with no product selected has no description to complain about either.
+      if (products.length > 0 && !row.productId)
+        found.push(`${label}: choose a product or service from your catalogue.`);
       if (!row.name.trim()) found.push(`${label} needs a description.`);
       if (toNumber(row.quantity) <= 0) found.push(`${label}: quantity must be greater than zero.`);
       if (toNumber(row.unitPrice) < 0) found.push(`${label}: unit price cannot be negative.`);
@@ -209,6 +229,17 @@ export function InvoiceForm({ initialCustomerId }: { initialCustomerId?: string 
         </div>
       )}
 
+      {products.length === 0 && (
+        <div className="rounded-card border border-ash bg-amber-wash px-4 py-3 text-body text-amber-ink">
+          Your catalogue is empty, and every invoice line is priced from it.{" "}
+          <Link href="/products/new" className="font-medium underline">
+            Add a product or service
+          </Link>{" "}
+          before creating an invoice. You only have to do this once — after that it is there for
+          every invoice you send.
+        </div>
+      )}
+
       <Card>
         <CardHeader
           title="Invoice details"
@@ -253,7 +284,7 @@ export function InvoiceForm({ initialCustomerId }: { initialCustomerId?: string 
       <Card>
         <CardHeader
           title="Items"
-          description="Pick from your catalogue or type a one-off line."
+          description="Every line comes from your catalogue. Prices and wording can still be adjusted for this invoice."
           action={
             <Button type="button" variant="secondary" size="sm" onClick={() => setRows((r) => [...r, emptyRow()])}>
               + Add item
@@ -288,10 +319,12 @@ export function InvoiceForm({ initialCustomerId }: { initialCustomerId?: string 
                   <div className="space-y-2">
                     <Select
                       aria-label={`Catalogue item for line ${index + 1}`}
-                      value=""
+                      value={row.productId}
                       onChange={(e) => onProductSelected(row.key, e.target.value)}
                     >
-                      <option value="">Custom line…</option>
+                      <option value="" disabled>
+                        Select a product or service…
+                      </option>
                       {products.map((product) => (
                         <option key={product.id} value={product.id}>
                           {product.name} — {formatMoney(product.price, currency)}

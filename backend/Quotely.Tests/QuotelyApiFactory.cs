@@ -238,7 +238,17 @@ public class QuotelyApiFactory : WebApplicationFactory<Program>, IAsyncLifetime
     /// invoice being payable at all. Tests about a business that has NOT connected one pass
     /// <paramref name="connectPayments"/> as false and say so.
     /// </summary>
-    public async Task<HttpClient> CreateSignedInClientAsync(string? email = null, bool connectPayments = true)
+    /// <param name="seedCatalogue">
+    /// Gives the new business one catalogue entry, because an invoice or a quotation cannot be
+    /// created without one — see <c>CatalogueGuard</c>. Every real business will have a catalogue
+    /// before it bills anyone, so the default here matches reality rather than making each of the
+    /// thirty-odd document tests restate the same setup.
+    ///
+    /// Pass false when the test is ABOUT the catalogue itself: anything counting products against
+    /// a free-tier limit has to start from zero, or the seed silently spends one of the allowance.
+    /// </param>
+    public async Task<HttpClient> CreateSignedInClientAsync(
+        string? email = null, bool connectPayments = true, bool seedCatalogue = true)
     {
         var client = CreateClient();
         var response = await client.PostAsJsonAsync("/api/auth/register", new
@@ -253,9 +263,31 @@ public class QuotelyApiFactory : WebApplicationFactory<Program>, IAsyncLifetime
         var auth = await response.Content.ReadFromJsonAsync<AuthResponse>();
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", auth!.AccessToken);
 
+        if (seedCatalogue) await SeedCatalogueEntryAsync(auth.User.Id);
         if (connectPayments) await ConnectRazorpayAsync(client);
 
         return client;
+    }
+
+    /// <summary>
+    /// Inserted straight into the database rather than posted to /api/products, so that a factory
+    /// running with free-tier enforcement on cannot have its own setup refused by the very limits
+    /// the test is there to exercise.
+    /// </summary>
+    private async Task SeedCatalogueEntryAsync(Guid userId)
+    {
+        using var scope = Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        db.Products.Add(new Quotely.Api.Models.Product
+        {
+            Id = Guid.NewGuid(),
+            UserId = userId,
+            Name = "Seeded catalogue entry",
+            Unit = "Service",
+            Price = 1000m,
+            TaxRate = 18m
+        });
+        await db.SaveChangesAsync();
     }
 }
 
