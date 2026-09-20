@@ -66,6 +66,9 @@ function toNumber(value: string) {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
+/** How a field that the catalogue owns looks: visibly not yours to type in. */
+const LOCKED_FIELD = "border-ash bg-paper text-fog cursor-not-allowed";
+
 export function InvoiceForm({ initialCustomerId }: { initialCustomerId?: string }) {
   const router = useRouter();
   const toast = useToast();
@@ -306,6 +309,10 @@ export function InvoiceForm({ initialCustomerId }: { initialCustomerId?: string 
 
         <div className="divide-y divide-ash">
           {rows.map((row, index) => {
+            // Everything the catalogue owns is fixed once a product is chosen. Quantity, the two
+            // text fields and the discount stay editable: quantity and wording are per-job, and a
+            // discount is a concession this customer is being given, not a property of the product.
+            const fromCatalogue = row.productId !== "";
             const line = calculateLine({
               quantity: toNumber(row.quantity),
               unitPrice: toNumber(row.unitPrice),
@@ -344,7 +351,12 @@ export function InvoiceForm({ initialCustomerId }: { initialCustomerId?: string 
                     />
                     <div className="lg:hidden">
                       <label className="text-caption font-medium text-fog">Unit</label>
-                      <Select value={row.unit} onChange={(e) => updateRow(row.key, { unit: e.target.value })}>
+                      <Select
+                        value={row.unit}
+                        disabled={fromCatalogue}
+                        title={fromCatalogue ? "Set by the catalogue. Edit the product to change it." : undefined}
+                        onChange={(e) => updateRow(row.key, { unit: e.target.value })}
+                      >
                         {UNITS.map((unit) => (
                           <option key={unit} value={unit}>
                             {unit}
@@ -364,8 +376,13 @@ export function InvoiceForm({ initialCustomerId }: { initialCustomerId?: string 
                       <select
                         aria-label={`Unit for line ${index + 1}`}
                         value={row.unit}
+                        disabled={fromCatalogue}
+                        title={fromCatalogue ? "Set by the catalogue. Edit the product to change it." : undefined}
                         onChange={(e) => updateRow(row.key, { unit: e.target.value })}
-                        className="mt-1.5 w-full truncate rounded-input border border-ash bg-canvas px-2 py-1 text-caption text-steel"
+                        className={cn(
+                          "mt-1.5 w-full truncate rounded-input border border-ash bg-canvas px-2 py-1 text-caption text-steel",
+                          fromCatalogue && LOCKED_FIELD,
+                        )}
                       >
                         {UNITS.map((unit) => (
                           <option key={unit} value={unit}>
@@ -377,10 +394,10 @@ export function InvoiceForm({ initialCustomerId }: { initialCustomerId?: string 
 
                     <label className="lg:hidden">
                       <span className="text-caption font-medium text-fog">Unit price</span>
-                      <MoneyInput field="unitPrice" row={row} onChange={updateRow} />
+                      <MoneyInput field="unitPrice" row={row} onChange={updateRow} locked={fromCatalogue} />
                     </label>
                     <div className="hidden lg:block">
-                      <MoneyInput field="unitPrice" row={row} onChange={updateRow} />
+                      <MoneyInput field="unitPrice" row={row} onChange={updateRow} locked={fromCatalogue} />
                     </div>
 
                     <label className="lg:hidden">
@@ -393,10 +410,10 @@ export function InvoiceForm({ initialCustomerId }: { initialCustomerId?: string 
 
                     <label className="lg:hidden">
                       <span className="text-caption font-medium text-fog">Tax %</span>
-                      <MoneyInput field="taxRate" row={row} onChange={updateRow} max={100} />
+                      <MoneyInput field="taxRate" row={row} onChange={updateRow} max={100} locked={fromCatalogue} />
                     </label>
                     <div className="hidden lg:block">
-                      <MoneyInput field="taxRate" row={row} onChange={updateRow} max={100} />
+                      <MoneyInput field="taxRate" row={row} onChange={updateRow} max={100} locked={fromCatalogue} />
                     </div>
                   </div>
 
@@ -410,15 +427,20 @@ export function InvoiceForm({ initialCustomerId }: { initialCustomerId?: string 
                   <div className="flex justify-end lg:pt-1">
                     <button
                       type="button"
-                      onClick={() => setRows((current) => current.filter((r) => r.key !== row.key))}
-                      disabled={rows.length === 1}
-                      aria-label={`Remove line ${index + 1}`}
-                      title="Remove this line"
+                      // Never disabled. The last line resets instead of vanishing, which is the
+                      // case that matters: the catalogue picker has no empty option, so choosing
+                      // the wrong product on a lone line would otherwise be impossible to undo.
+                      onClick={() =>
+                        setRows((current) =>
+                          current.length === 1 ? [emptyRow()] : current.filter((r) => r.key !== row.key),
+                        )
+                      }
+                      aria-label={rows.length === 1 ? "Clear line 1" : `Remove line ${index + 1}`}
+                      title={rows.length === 1 ? "Clear this line" : "Remove this line"}
                       className={cn(
                         "inline-flex h-9 w-9 items-center justify-center rounded-input",
                         "text-fog transition-colors duration-150 ease-out",
                         "hover:bg-rose-wash hover:text-rose-ink",
-                        "disabled:pointer-events-none disabled:opacity-30",
                       )}
                     >
                       <Icon.trash className="h-4 w-4" />
@@ -515,16 +537,24 @@ function QuantityInput({
   );
 }
 
+/**
+ * `locked` is readOnly rather than disabled, deliberately. A disabled field is skipped by keyboard
+ * navigation and read out as unavailable, which is the wrong story: the number is not unavailable,
+ * it is authoritative. readOnly keeps it focusable and selectable — someone can still tab to it,
+ * read it, and copy it — while refusing edits.
+ */
 function MoneyInput({
   field,
   row,
   onChange,
   max,
+  locked,
 }: {
   field: "unitPrice" | "discount" | "taxRate";
   row: ItemRow;
   onChange: (key: string, patch: Partial<ItemRow>) => void;
   max?: number;
+  locked?: boolean;
 }) {
   const labels = { unitPrice: "Unit price", discount: "Discount", taxRate: "Tax rate" } as const;
   return (
@@ -535,9 +565,11 @@ function MoneyInput({
       step="0.01"
       inputMode="decimal"
       aria-label={labels[field]}
+      readOnly={locked}
+      title={locked ? "Set by the catalogue. Edit the product to change it." : undefined}
       value={row[field]}
       onChange={(e) => onChange(row.key, { [field]: e.target.value } as Partial<ItemRow>)}
-      className={`${inputClass} text-right`}
+      className={cn(inputClass, "text-right", locked && LOCKED_FIELD)}
     />
   );
 }
