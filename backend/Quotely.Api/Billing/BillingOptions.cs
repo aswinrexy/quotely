@@ -96,8 +96,12 @@ public class BillingPlanOptions
 /// not need a deployment to change.
 ///
 /// The shape of the tier: the product is fully VISIBLE, and a business can run a real if small
-/// operation on it — a handful of customers, a short catalogue, a modest number of invoices.
-/// What it cannot do is quote, take card payments, or grow past those counts.
+/// operation on it — a handful of customers and a modest number of invoices, priced from a
+/// catalogue it can build out as far as it likes. What it cannot do is quote, take card payments,
+/// or grow past those counts.
+///
+/// The catalogue is deliberately not one of the counts. Every document line is priced from it, so
+/// capping it would cap what a business can bill for at all rather than how much.
 /// </summary>
 public class EntitlementOptions
 {
@@ -138,7 +142,24 @@ public class EntitlementOptions
 
     public int? MaxCustomers { get; set; } = 5;
 
-    public int? MaxProducts { get; set; } = 10;
+    /// <summary>
+    /// Null: a free account may build as large a catalogue as it likes.
+    ///
+    /// This was 10, and capping it stopped making sense the moment every invoice and quotation
+    /// line had to come from the catalogue. Free text used to be the escape hatch; with it gone, a
+    /// business at the cap could not bill for an eleventh distinct thing AT ALL — not at a limit,
+    /// not with a warning, simply unable to invoice work it had done. A limit that stops someone
+    /// billing their customer does not sell subscriptions, it loses them.
+    ///
+    /// The catalogue is also not what Pro is worth paying for. Volume is: invoices and customers
+    /// still carry allowances, and those grow with the business in a way a price list does not.
+    /// Setting up a catalogue is the work a new account does before its first invoice, and taxing
+    /// that is taxing the part we want them to finish.
+    ///
+    /// Still configurable, and the enforcement path is unchanged and still tested — this is a
+    /// commercial decision, not a removed capability.
+    /// </summary>
+    public int? MaxProducts { get; set; }
 
     /// <summary>
     /// Whether an existing invoice can still be paid online. True on purpose: a customer settling
