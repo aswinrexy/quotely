@@ -20,6 +20,15 @@ import { QUOTATION_STATUSES } from "@/types";
 interface ItemRow {
   key: string;
   productId: string | null;
+  /**
+   * True for a line loaded from an already-saved quotation.
+   *
+   * Quotations written before the catalogue became mandatory can hold lines with no productId at
+   * all. Those documents still have to be editable — refusing to save one because of a rule that
+   * did not exist when it was written would strand a customer's quotation, and the rule is about
+   * how NEW work is priced, not about rewriting history. New rows get no such exemption.
+   */
+  existing: boolean;
   name: string;
   description: string;
   unit: string;
@@ -33,6 +42,7 @@ function emptyRow(): ItemRow {
   return {
     key: crypto.randomUUID(),
     productId: null,
+    existing: false,
     name: "",
     description: "",
     unit: "Service",
@@ -75,6 +85,7 @@ export function QuotationForm({ quotation, initialCustomerId }: Props) {
       ? quotation.items.map((item) => ({
           key: item.id,
           productId: item.productId ?? null,
+          existing: true,
           name: item.name,
           description: item.description ?? "",
           unit: item.unit,
@@ -149,8 +160,16 @@ export function QuotationForm({ quotation, initialCustomerId }: Props) {
       found.push("Valid until must be on or after the quotation date.");
     if (rows.length === 0) found.push("Add at least one item.");
 
+    // Said once, not once per line. With nothing in the catalogue, telling someone to pick from it
+    // five times is noise — the one thing they can act on is adding the first product.
+    if (products.length === 0 && rows.some((row) => !row.existing))
+      found.push("Add a product or service to your catalogue before quoting.");
+
     rows.forEach((row, index) => {
       const label = row.name.trim() || `Item ${index + 1}`;
+      // `existing` rows are exempt: see ItemRow. A new line always has to come from the catalogue.
+      if (products.length > 0 && !row.existing && !row.productId)
+        found.push(`${label}: choose a product or service from your catalogue.`);
       if (!row.name.trim()) found.push(`${label} needs a description.`);
       if (toNumber(row.quantity) <= 0) found.push(`${label}: quantity must be greater than zero.`);
       if (toNumber(row.unitPrice) < 0) found.push(`${label}: unit price cannot be negative.`);
@@ -259,6 +278,17 @@ export function QuotationForm({ quotation, initialCustomerId }: Props) {
         </div>
       )}
 
+      {products.length === 0 && (
+        <div className="rounded-card border border-ash bg-amber-wash px-4 py-3 text-body text-amber-ink">
+          Your catalogue is empty, and every quoted line is priced from it.{" "}
+          <Link href="/products/new" className="font-medium underline">
+            Add a product or service
+          </Link>{" "}
+          before quoting. You only have to do this once — after that it is there for every
+          quotation you send.
+        </div>
+      )}
+
       <Card>
         <CardHeader title="Quotation details" />
         <CardBody>
@@ -310,7 +340,7 @@ export function QuotationForm({ quotation, initialCustomerId }: Props) {
       <Card>
         <CardHeader
           title="Items"
-          description="Pick from your catalogue or type a one-off line."
+          description="Every line comes from your catalogue. Prices and wording can still be adjusted for this quotation."
           action={
             <Button type="button" variant="secondary" size="sm" onClick={() => setRows((r) => [...r, emptyRow()])}>
               + Add item
@@ -348,7 +378,9 @@ export function QuotationForm({ quotation, initialCustomerId }: Props) {
                       value={row.productId ?? ""}
                       onChange={(e) => onProductSelected(row.key, e.target.value)}
                     >
-                      <option value="">Custom line…</option>
+                      <option value="" disabled={!row.existing}>
+                        {row.existing && !row.productId ? "Not from the catalogue" : "Select a product or service…"}
+                      </option>
                       {products.map((product) => (
                         <option key={product.id} value={product.id}>
                           {product.name} — {formatMoney(product.price, currency)}
@@ -358,7 +390,10 @@ export function QuotationForm({ quotation, initialCustomerId }: Props) {
                     <Input
                       aria-label={`Description for line ${index + 1}`}
                       value={row.name}
-                      onChange={(e) => updateRow(row.key, { name: e.target.value, productId: null })}
+                      // Deliberately keeps productId. Adjusting the wording for one job is normal;
+                      // it does not mean the line stopped coming from the catalogue, and clearing
+                      // the link here would make the line unsavable the moment it was edited.
+                      onChange={(e) => updateRow(row.key, { name: e.target.value })}
                     />
                     <Input
                       aria-label={`Detail for line ${index + 1}`}

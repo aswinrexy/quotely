@@ -91,6 +91,7 @@ public class QuotationService : IQuotationService
     public async Task<QuotationDto> CreateAsync(Guid userId, SaveQuotationRequest request, CancellationToken ct = default)
     {
         Validate(request);
+        await CatalogueGuard.EnsureNotEmptyAsync(_db, userId, "quotation", ct);
         await EnsureCustomerOwnedAsync(userId, request.CustomerId, ct);
 
         var sequence = await NextSequenceAsync(userId, ct);
