@@ -32,9 +32,10 @@ to justify it; until then the platform domains are real, HTTPS-terminated URLs t
 | Layer | State | URL |
 | --- | --- | --- |
 | Supabase PostgreSQL | **Live**, migrated, empty | `ap-southeast-2` (Sydney) |
-| Render API | **Live**, smoke-tested | https://quotely-api-yiul.onrender.com |
-| Health | **Live** | https://quotely-api-yiul.onrender.com/health |
-| Cloudflare Pages | **Live** | https://quotely-4j2.pages.dev |
+| Render API | **Live**, smoke-tested | https://api.quotely4you.org |
+| Health | **Live** | https://api.quotely4you.org/health |
+| Cloudflare Pages | **Live** | https://quotely4you.org |
+| Origin hosts (fallback) | **Live** | `quotely-api-yiul.onrender.com`, `quotely-4j2.pages.dev` |
 
 ### Webhook routes changed in V2.7
 
@@ -606,7 +607,7 @@ not belong to whoever issued it.
 ### 5. Verify
 
 ```bash
-curl -s https://quotely-api-yiul.onrender.com/health
+curl -s https://api.quotely4you.org/health
 ```
 
 Then, signed in: Settings → Payments shows **Connected**; Settings → Billing shows a trial and
@@ -656,33 +657,66 @@ state rather than a failure.
 
 ## Custom domain
 
+**`quotely4you.org` — registered 21 September 2026 at Cloudflare Registrar, and live.**
+
 Nothing is hard-coded, and nothing should be. The domain lives entirely in configuration:
 
-| Setting | Value after purchase |
+| Setting | Value |
 | --- | --- |
-| `PublicLinks__BaseUrl` | `https://quotelyhq.com` — the **frontend**, never the API |
-| `Cors__AllowedOrigins__0` | `https://quotelyhq.com` |
-| `Razorpay__Oauth__RedirectUri` | `https://quotelyhq.com/settings/payments` |
+| `PublicLinks__BaseUrl` | `https://quotely4you.org` — the **frontend**, never the API |
+| `Cors__AllowedOrigins__0` | `https://quotely4you.org` |
+| `Cors__AllowedOrigins__1` | `https://quotely-4j2.pages.dev` — cutover fallback, remove once unused |
+| `NEXT_PUBLIC_API_BASE_URL` (Pages) | `https://api.quotely4you.org` |
+| `Razorpay__Oauth__RedirectUri` | `https://quotely4you.org/settings/payments` — only once OAuth is approved |
 
-Target architecture:
+Architecture as built:
 
 ```
-https://quotelyhq.com            → Cloudflare Pages
-https://api.quotelyhq.com        → Render
-https://quotelyhq.com/q/{token}  → public quotation (a frontend route)
-https://quotelyhq.com/i/{token}  → public invoice   (a frontend route)
+https://quotely4you.org            → Cloudflare Pages   (proxied, apex via CNAME flattening)
+https://www.quotely4you.org        → 301 to the apex    (Redirect Rule, query string preserved)
+https://api.quotely4you.org        → Render             (DNS only — see below)
+https://quotely4you.org/q/{token}  → public quotation   (a frontend route)
+https://quotely4you.org/i/{token}  → public invoice     (a frontend route)
+support@quotely4you.org            → Cloudflare Email Routing
 ```
 
 `PublicLinks__BaseUrl` must point at the **frontend**. Pointing it at `api.` produces share links
 that resolve to nothing — `/q/{token}` and `/i/{token}` are Next.js routes, not API routes.
 
-Once the custom domain is live, stop giving customers the `.onrender.com` address.
+### The api. record must stay unproxied
+
+`api` is a **grey-cloud (DNS only)** CNAME to the Render host, and the opposite of what Pages sets
+up for the site itself. With Cloudflare's proxy on, Render's ACME challenge terminates at Cloudflare
+instead of reaching Render, the certificate is never issued, and the failure reads like a Render
+outage rather than a DNS setting.
+
+### Changing the domain requires a frontend REBUILD
+
+`NEXT_PUBLIC_API_BASE_URL` is inlined into the JavaScript bundle at build time, because the app is
+a static export. Editing the variable in the Pages dashboard changes nothing on its own — the old
+URL stays compiled into the shipped chunks until a new build runs. Set the variable, then retry the
+deployment, then confirm from outside:
+
+```bash
+# the live bundle must contain the new host and not the old one
+curl -s https://quotely4you.org/login \
+  | grep -o '/_next/static/chunks/[A-Za-z0-9_.-]*\.js' | sort -u \
+  | while read f; do curl -s "https://quotely4you.org$f"; done \
+  | grep -o 'https://api\.quotely4you\.org' | head -1
+```
+
+A green "Success" in the Pages dashboard does not prove the bundle changed; an unchanged chunk hash
+proves it did not.
+
+### Order of operations
+
+Widen CORS on the API **before** pointing the frontend at the new host. Reverse that order and the
+app is broken for the length of the Render deploy — every request blocked by the browser, with a
+CORS error in the console and nothing useful on screen.
 
 ### Availability is not clearance
 
-`quotelyhq.com` was **available** when checked on 19 September 2026, via Verisign RDAP. That is a
-statement about a registry, and nothing more.
-
 **Domain availability does not establish trademark clearance.** Someone has held `quotely.com`
 since 2006, and at least four other parties registered Quotely-shaped domains in the last two
-years. Get a lawyer's view before putting the name on anything you would find expensive to change.
+years. Registering `quotely4you.org` says the registry had it free; it says nothing about the name.
+Get a lawyer's view before putting the name on anything you would find expensive to change.
