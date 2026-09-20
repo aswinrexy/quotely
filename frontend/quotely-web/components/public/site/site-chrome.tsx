@@ -15,15 +15,18 @@ import Link from "next/link";
 /**
  * The business behind Quotely.
  *
- * THESE ARE PLACEHOLDERS AND MUST BE REPLACED BEFORE SUBMITTING THE SITE TO RAZORPAY. A payment
- * aggregator verifies that the operator is contactable, and an unreachable phone number or a
- * missing address is a common cause of rejection. They are written here, once, rather than
- * scattered through six pages.
+ * A payment aggregator verifies that the operator is contactable, so everything here has to be
+ * real and answered. Written once, rather than scattered through six pages, so the address on the
+ * refund policy can never drift from the address on the contact page.
+ *
+ * STILL OUTSTANDING: addressLines is a region, not a registered address. Razorpay's website
+ * review expects a postal address it could send a letter to — building, street, city, PIN. Fill
+ * that in before submitting the site.
  */
 export const COMPANY = {
   legalName: "Quotely",
   email: "support@quotely4you.org",
-  phone: "+91 00000 00000",
+  phone: "+91 85475 91966",
   addressLines: ["Kerala", "India"],
   supportHours: "Monday to Friday, 10:00–18:00 IST",
   /** How quickly a support email is answered. Stated publicly, so it has to be true. */
