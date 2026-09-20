@@ -132,6 +132,8 @@ public class InvoiceService : IInvoiceService
         if (request.Items is null || request.Items.Count == 0)
             throw ApiException.BadRequest("An invoice needs at least one item.");
 
+        await CatalogueGuard.EnsureNotEmptyAsync(_db, userId, "invoice", ct);
+
         ValidateItems(request.Items);
 
         // Ownership first. Another tenant's customer is a 404, exactly as an unknown id would be,
