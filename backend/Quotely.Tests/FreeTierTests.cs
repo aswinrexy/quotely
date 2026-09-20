@@ -42,39 +42,6 @@ public class FreeTierFactory : QuotelyApiFactory
         }));
     }
 
-    /// <summary>
-    /// Ends the trial, so the account falls to the free tier. Done by moving the dates rather
-    /// than by waiting, and through the same fields a real expiry would set.
-    /// </summary>
-    public async Task ExpireTrialAsync(HttpClient client)
-    {
-        var email = await EmailOfAsync(client);
-
-        using var scope = Services.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-
-        var user = await db.Users.FirstAsync(u => u.Email == email);
-        var subscription = await db.Subscriptions.FirstAsync(s => s.UserId == user.Id);
-
-        subscription.TrialEnd = DateTime.UtcNow.AddDays(-1);
-        subscription.Status = SubscriptionStatus.Expired;
-        await db.SaveChangesAsync();
-    }
-
-    private static async Task<string> EmailOfAsync(HttpClient client)
-    {
-        var me = await client.GetFromJsonAsync<SubscriptionDto>("/api/billing/subscription", Json);
-        me.Should().NotBeNull();
-
-        // The subscription response carries no email, so the account is identified by the token
-        // the client is already holding — decoded rather than guessed.
-        var token = client.DefaultRequestHeaders.Authorization!.Parameter!;
-        var payload = token.Split('.')[1];
-        payload = payload.PadRight(payload.Length + (4 - payload.Length % 4) % 4, '=')
-            .Replace('-', '+').Replace('_', '/');
-        using var json = System.Text.Json.JsonDocument.Parse(Convert.FromBase64String(payload));
-        return json.RootElement.GetProperty("email").GetString()!;
-    }
 }
 
 public class FreeTierTests : IClassFixture<FreeTierFactory>
