@@ -43,6 +43,23 @@ public class TradeInvoiceDetails
     public string PartyName { get; set; } = string.Empty;
     public string? PartyAddress { get; set; }
 
+    // ---- consignor, when the goods leave from someone else --------------
+    /// <summary>
+    /// True — the overwhelming default — means the business named above is also the party the
+    /// goods physically ship from, and the document prints one block for both roles.
+    ///
+    /// It is false for a business that arranges shipments on someone else's behalf: a freight
+    /// agency or a merchant exporter whose client's goods leave the client's own premises. There
+    /// the exporter of record and the consignor are genuinely different parties, and a document
+    /// that named only one of them would misdescribe the shipment.
+    ///
+    /// Stored rather than inferred from whether the fields below are filled, so that clearing a
+    /// consignor is an explicit decision and not an accident of an empty box.
+    /// </summary>
+    public bool ConsignorSameAsParty { get; set; } = true;
+    public string? ConsignorName { get; set; }
+    public string? ConsignorAddress { get; set; }
+
     // ---- consignee -----------------------------------------------------
     public string ConsigneeName { get; set; } = string.Empty;
     public string? ConsigneeAddress { get; set; }

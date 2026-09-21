@@ -56,7 +56,19 @@ public class TradeInvoiceDocument : IDocument
     /// duplicate the first on almost every document, and a form with two boxes that always agree
     /// is one people stop filling in carefully.
     /// </summary>
-    private string PartyLabel => IsExport ? "Exporter / Consignor" : "Importer / Consignee";
+    private string PartyLabel =>
+        // When a separate consignor is named, the two roles are no longer the same party, so the
+        // combined label would be a claim the document itself contradicts two boxes lower.
+        ConsignorDiffers
+            ? (IsExport ? "Exporter" : "Importer")
+            : (IsExport ? "Exporter / Consignor" : "Importer / Consignee");
+
+    /// <summary>
+    /// Whether the goods ship from someone other than the issuing business — an agency arranging a
+    /// client's shipment, or a merchant exporter shipping from a manufacturer's premises.
+    /// </summary>
+    private bool ConsignorDiffers =>
+        !_details.ConsignorSameAsParty && !string.IsNullOrWhiteSpace(_details.ConsignorName);
     private string CounterpartyLabel => IsExport ? "Consignee" : "Supplier / Exporter";
     private string DestinationCountryLabel =>
         IsExport ? "Country of final destination" : "Country of import";
@@ -142,6 +154,15 @@ public class TradeInvoiceDocument : IDocument
             row.RelativeItem(42).Column(left =>
             {
                 left.Item().Element(c => AddressCell(c, $"{PartyLabel}:", _details.PartyName, _details.PartyAddress, logo: true));
+
+                // Printed only when it is a different party. Reading down, the left column then
+                // follows the goods: who exports them, who ships them, who receives them.
+                if (ConsignorDiffers)
+                {
+                    left.Item().BorderTop(Border).BorderColor(Rule)
+                        .Element(c => AddressCell(c, "Consignor:", _details.ConsignorName, _details.ConsignorAddress));
+                }
+
                 left.Item().BorderTop(Border).BorderColor(Rule)
                     .Element(c => AddressCell(c, $"{CounterpartyLabel}:", _details.ConsigneeName, _details.ConsigneeAddress));
             });
