@@ -269,6 +269,13 @@ public class TradeInvoiceService : ITradeInvoiceService
         details.PartyName = Trim(request.PartyName) ?? defaults.PartyName ?? string.Empty;
         details.PartyAddress = Trim(request.PartyAddress) ?? defaults.PartyAddress;
 
+        details.ConsignorSameAsParty = request.ConsignorSameAsParty;
+        // Cleared rather than kept when the business ships its own goods, for the same reason the
+        // buyer is: a stale consignor left in the row would resurrect itself the next time someone
+        // unticked the box, naming a party nobody chose.
+        details.ConsignorName = request.ConsignorSameAsParty ? null : Trim(request.ConsignorName);
+        details.ConsignorAddress = request.ConsignorSameAsParty ? null : Trim(request.ConsignorAddress);
+
         // The consignee defaults to the selected customer, which is the whole point of picking one.
         details.ConsigneeName = Trim(request.ConsigneeName) ?? customer.Name;
         details.ConsigneeAddress = Trim(request.ConsigneeAddress) ?? ComposeCustomerAddress(customer);
@@ -543,6 +550,9 @@ public class TradeInvoiceService : ITradeInvoiceService
 
             PartyName = d?.PartyName ?? string.Empty,
             PartyAddress = d?.PartyAddress,
+            ConsignorSameAsParty = d?.ConsignorSameAsParty ?? true,
+            ConsignorName = d?.ConsignorName,
+            ConsignorAddress = d?.ConsignorAddress,
             ConsigneeName = d?.ConsigneeName ?? invoice.CustomerName,
             ConsigneeAddress = d?.ConsigneeAddress,
             BuyerSameAsConsignee = d?.BuyerSameAsConsignee ?? true,

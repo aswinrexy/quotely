@@ -813,6 +813,10 @@ export interface TradeInvoice {
 
   partyName: string;
   partyAddress?: string | null;
+  /** True when the issuing business is also the party the goods ship from. */
+  consignorSameAsParty: boolean;
+  consignorName?: string | null;
+  consignorAddress?: string | null;
   consigneeName: string;
   consigneeAddress?: string | null;
   buyerSameAsConsignee: boolean;

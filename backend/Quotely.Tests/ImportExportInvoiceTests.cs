@@ -292,6 +292,91 @@ public class ImportExportInvoiceTests : IClassFixture<QuotelyApiFactory>
     }
 
     [Fact]
+    public async Task By_default_the_issuing_business_is_also_the_consignor()
+    {
+        var client = await _factory.CreateSignedInClientAsync(connectPayments: false);
+        var customer = await CreateCustomerAsync(client);
+
+        var invoice = await CreateAsync(client, customer.Id);
+
+        // The overwhelming case: a business shipping its own goods. No second party is named, and
+        // the document prints one block for both roles.
+        invoice.ConsignorSameAsParty.Should().BeTrue();
+        invoice.ConsignorName.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task An_agency_can_name_a_consignor_that_is_not_itself()
+    {
+        // The freight-agency case: the client is sending the goods, the client's relative receives
+        // them, and the agency is the exporter of record. Three different parties on one document.
+        var client = await _factory.CreateSignedInClientAsync(connectPayments: false);
+        var customer = await CreateCustomerAsync(client, "Ragesh Kumar");
+
+        var invoice = await CreateAsync(client, customer.Id, new
+        {
+            customerId = customer.Id,
+            invoiceDate = Today.ToString("yyyy-MM-dd"),
+            partyName = "Sample Freight Services Pvt Ltd",
+            consignorSameAsParty = false,
+            consignorName = "Alia Rahman",
+            consignorAddress = "22 MG Road, Kochi, Kerala, India",
+            consigneeName = "Ragesh Kumar",
+            items = ReferenceLines,
+        });
+
+        invoice.ConsignorSameAsParty.Should().BeFalse();
+        invoice.ConsignorName.Should().Be("Alia Rahman");
+        invoice.ConsignorAddress.Should().Contain("Kochi");
+        invoice.PartyName.Should().Be("Sample Freight Services Pvt Ltd");
+        invoice.ConsigneeName.Should().Be("Ragesh Kumar");
+    }
+
+    [Fact]
+    public async Task A_consignor_is_cleared_when_the_business_ships_its_own_goods()
+    {
+        var client = await _factory.CreateSignedInClientAsync(connectPayments: false);
+        var customer = await CreateCustomerAsync(client);
+
+        var invoice = await CreateAsync(client, customer.Id, new
+        {
+            customerId = customer.Id,
+            invoiceDate = Today.ToString("yyyy-MM-dd"),
+            consignorSameAsParty = true,
+            consignorName = "SOMEONE ELSE ENTIRELY",
+            consignorAddress = "Nowhere",
+            items = ReferenceLines,
+        });
+
+        // Cleared on the way IN, not merely hidden on the way out — so re-unticking the box on a
+        // later edit cannot resurrect a consignor nobody chose.
+        invoice.ConsignorName.Should().BeNull();
+        invoice.ConsignorAddress.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task A_document_naming_a_separate_consignor_still_renders()
+    {
+        var client = await _factory.CreateSignedInClientAsync(connectPayments: false);
+        var customer = await CreateCustomerAsync(client, "Ragesh Kumar");
+
+        var invoice = await CreateAsync(client, customer.Id, new
+        {
+            customerId = customer.Id,
+            invoiceDate = Today.ToString("yyyy-MM-dd"),
+            consignorSameAsParty = false,
+            consignorName = "Alia Rahman",
+            consignorAddress = "22 MG Road, Kochi, Kerala, India",
+            items = ReferenceLines,
+        });
+
+        var response = await client.GetAsync($"/api/import-export/invoices/{invoice.Id}/pdf");
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        (await response.Content.ReadAsByteArrayAsync()).Length.Should().BeGreaterThan(3000);
+    }
+
+    [Fact]
     public async Task An_import_document_is_the_same_document_with_the_parties_reversed()
     {
         var client = await _factory.CreateSignedInClientAsync(connectPayments: false);

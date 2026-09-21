@@ -111,6 +111,11 @@ export function TradeInvoiceForm({ invoice }: { invoice?: TradeInvoice }) {
 
   const [partyName, setPartyName] = useState(invoice?.partyName ?? "");
   const [partyAddress, setPartyAddress] = useState(invoice?.partyAddress ?? "");
+  const [consignorSameAsParty, setConsignorSameAsParty] = useState(
+    invoice?.consignorSameAsParty ?? true,
+  );
+  const [consignorName, setConsignorName] = useState(invoice?.consignorName ?? "");
+  const [consignorAddress, setConsignorAddress] = useState(invoice?.consignorAddress ?? "");
   const [consigneeName, setConsigneeName] = useState(invoice?.consigneeName ?? "");
   const [consigneeAddress, setConsigneeAddress] = useState(invoice?.consigneeAddress ?? "");
   const [buyerSameAsConsignee, setBuyerSameAsConsignee] = useState(
@@ -284,6 +289,9 @@ export function TradeInvoiceForm({ invoice }: { invoice?: TradeInvoice }) {
       otherReferences: otherReferences.trim() || null,
       partyName: partyName.trim() || null,
       partyAddress: partyAddress.trim() || null,
+      consignorSameAsParty,
+      consignorName: consignorSameAsParty ? null : consignorName.trim() || null,
+      consignorAddress: consignorSameAsParty ? null : consignorAddress.trim() || null,
       consigneeName: consigneeName.trim() || null,
       consigneeAddress: consigneeAddress.trim() || null,
       buyerSameAsConsignee,
@@ -363,7 +371,9 @@ export function TradeInvoiceForm({ invoice }: { invoice?: TradeInvoice }) {
   }
 
   const isExport = tradeType === "Export";
-  const partyLabel = isExport ? "Exporter" : "Importer";
+  // Both roles named: on an export the exporter IS the consignor, and on an import the importer
+  // IS the consignee. A separate consignor box would duplicate this one on almost every document.
+  const partyLabel = isExport ? "Exporter / Consignor" : "Importer / Consignee";
   const counterpartyLabel = isExport ? "Consignee" : "Supplier / Exporter";
 
   return (
@@ -556,6 +566,47 @@ export function TradeInvoiceForm({ invoice }: { invoice?: TradeInvoice }) {
             </div>
           </div>
 
+          {/*
+            Ticked for the overwhelming majority: a business shipping its own goods is also the
+            consignor. Unticked is the agency case — arranging a shipment for a client, where the
+            goods leave the client's premises and the two are genuinely different parties.
+          */}
+          <div className="rounded-card border border-ash p-4">
+            <label className="flex items-center gap-2.5 text-body text-charcoal">
+              <input
+                type="checkbox"
+                checked={consignorSameAsParty}
+                onChange={(e) => setConsignorSameAsParty(e.target.checked)}
+                className="h-4 w-4 rounded border-midnight accent-electric"
+              />
+              We are also the consignor — the goods ship from us
+            </label>
+
+            {!consignorSameAsParty && (
+              <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                <Field
+                  label="Consignor name"
+                  htmlFor="consignorName"
+                  hint="Whoever the goods actually ship from."
+                >
+                  <Input
+                    id="consignorName"
+                    value={consignorName}
+                    onChange={(e) => setConsignorName(e.target.value)}
+                  />
+                </Field>
+                <Field label="Consignor address" htmlFor="consignorAddress">
+                  <Textarea
+                    id="consignorAddress"
+                    rows={2}
+                    value={consignorAddress}
+                    onChange={(e) => setConsignorAddress(e.target.value)}
+                  />
+                </Field>
+              </div>
+            )}
+          </div>
+
           <div className="rounded-card border border-ash p-4">
             <label className="flex items-center gap-2.5 text-body text-charcoal">
               <input
@@ -564,7 +615,9 @@ export function TradeInvoiceForm({ invoice }: { invoice?: TradeInvoice }) {
                 onChange={(e) => setBuyerSameAsConsignee(e.target.checked)}
                 className="h-4 w-4 rounded border-midnight accent-electric"
               />
-              Buyer is the same as the {counterpartyLabel.toLowerCase()}
+              {/* "the consignee", not the counterparty: on an import the consignee is the importer,
+                  so naming the counterparty would claim the buyer is the overseas supplier. */}
+              Buyer is the same as the consignee
             </label>
 
             {!buyerSameAsConsignee && (

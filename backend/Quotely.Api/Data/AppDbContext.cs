@@ -242,6 +242,8 @@ public class AppDbContext : IdentityDbContext<AppUser, IdentityRole<Guid>, Guid>
 
             e.Property(x => x.PartyName).HasMaxLength(200).IsRequired();
             e.Property(x => x.PartyAddress).HasMaxLength(600);
+            e.Property(x => x.ConsignorName).HasMaxLength(200);
+            e.Property(x => x.ConsignorAddress).HasMaxLength(600);
             e.Property(x => x.ConsigneeName).HasMaxLength(200).IsRequired();
             e.Property(x => x.ConsigneeAddress).HasMaxLength(600);
             e.Property(x => x.BuyerName).HasMaxLength(200);
