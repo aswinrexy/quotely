@@ -1204,6 +1204,17 @@ namespace Quotely.Migrations.PostgreSql.Migrations
                         .HasMaxLength(200)
                         .HasColumnType("character varying(200)");
 
+                    b.Property<string>("ConsignorAddress")
+                        .HasMaxLength(600)
+                        .HasColumnType("character varying(600)");
+
+                    b.Property<string>("ConsignorName")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<bool>("ConsignorSameAsParty")
+                        .HasColumnType("boolean");
+
                     b.Property<string>("CountryOfFinalDestination")
                         .HasMaxLength(120)
                         .HasColumnType("character varying(120)");

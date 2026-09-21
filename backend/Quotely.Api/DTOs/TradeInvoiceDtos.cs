@@ -80,6 +80,10 @@ public record TradeInvoiceDto
 
     public string PartyName { get; init; } = string.Empty;
     public string? PartyAddress { get; init; }
+    /// <summary>True when the issuing business is also the party the goods ship from.</summary>
+    public bool ConsignorSameAsParty { get; init; }
+    public string? ConsignorName { get; init; }
+    public string? ConsignorAddress { get; init; }
     public string ConsigneeName { get; init; } = string.Empty;
     public string? ConsigneeAddress { get; init; }
     public bool BuyerSameAsConsignee { get; init; }
@@ -197,6 +201,14 @@ public record SaveTradeInvoiceRequest
     /// <summary>Null falls back to the trade profile, then the business profile.</summary>
     [MaxLength(200)] public string? PartyName { get; init; }
     [MaxLength(600)] public string? PartyAddress { get; init; }
+
+    /// <summary>
+    /// False when the goods ship from a party other than the issuing business — an agency
+    /// arranging a client's shipment, or a merchant exporter shipping from a manufacturer.
+    /// </summary>
+    public bool ConsignorSameAsParty { get; init; } = true;
+    [MaxLength(200)] public string? ConsignorName { get; init; }
+    [MaxLength(600)] public string? ConsignorAddress { get; init; }
 
     /// <summary>Null falls back to the selected customer's name and address.</summary>
     [MaxLength(200)] public string? ConsigneeName { get; init; }
