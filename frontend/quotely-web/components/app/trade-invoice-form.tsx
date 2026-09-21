@@ -371,9 +371,13 @@ export function TradeInvoiceForm({ invoice }: { invoice?: TradeInvoice }) {
   }
 
   const isExport = tradeType === "Export";
-  // Both roles named: on an export the exporter IS the consignor, and on an import the importer
-  // IS the consignee. A separate consignor box would duplicate this one on almost every document.
-  const partyLabel = isExport ? "Exporter / Consignor" : "Importer / Consignee";
+  // Just "Exporter" here, even though this party is usually the consignor too.
+  //
+  // The document views name both roles, because there the combined label is the only thing telling
+  // a reader the two are the same party. This form has something better: the consignor checkbox
+  // sits directly below, saying it in words. Naming the role twice — once in a field label and
+  // again in a control right under it — reads as two different fields for the same thing.
+  const partyLabel = isExport ? "Exporter" : "Importer";
   const counterpartyLabel = isExport ? "Consignee" : "Supplier / Exporter";
 
   return (
