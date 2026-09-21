@@ -128,6 +128,10 @@ builder.Services.AddScoped<IQuotationService, QuotationService>();
 builder.Services.AddScoped<IPublicQuotationService, PublicQuotationService>();
 builder.Services.AddScoped<IInvoiceService, InvoiceService>();
 builder.Services.AddScoped<IPublicInvoiceService, PublicInvoiceService>();
+// Import/export. Extra detail on the existing invoice, so these sit alongside the invoice
+// services rather than replacing anything.
+builder.Services.AddScoped<ITradeInvoiceService, TradeInvoiceService>();
+builder.Services.AddScoped<ITradeProfileService, TradeProfileService>();
 builder.Services.AddScoped<ICustomerSummaryService, CustomerSummaryService>();
 builder.Services.AddScoped<IPaymentService, PaymentService>();
 builder.Services.AddScoped<IWebhookService, WebhookService>();

@@ -26,6 +26,18 @@ public class Invoice
     public Guid CustomerId { get; set; }
     public Customer? Customer { get; set; }
 
+    /// <summary>
+    /// What kind of document this is. Standard is 0, so every invoice raised before import/export
+    /// existed reads as exactly what it always was without a single row being touched.
+    /// </summary>
+    public InvoiceType Type { get; set; } = InvoiceType.Standard;
+
+    /// <summary>
+    /// The import/export detail, present only on a trade document. One invoice entity, one extra
+    /// table — not a second kind of invoice with its own totals, payments and sharing.
+    /// </summary>
+    public TradeInvoiceDetails? TradeDetails { get; set; }
+
     /// <summary>Human-readable number, unique per user. Example: INV-000001.</summary>
     public string InvoiceNumber { get; set; } = string.Empty;
     /// <summary>Numeric part of the invoice number, used to allocate the next value.</summary>
@@ -96,6 +108,15 @@ public class Invoice
     /// issued, a cancelled invoice is void, and a settled one has nothing left to collect.
     /// The outstanding balance is checked separately, against recorded payments.
     /// </summary>
+    ///
+    /// A proforma invoice is refused regardless of status. It describes a shipment that has not
+    /// happened and demands nothing, so a Pay button on one would invite a customer to pay against
+    /// a document their bank will not recognise. That check only ever WITHHOLDS payment: a
+    /// commercial invoice still has to satisfy every rule a domestic invoice does.
     public bool AcceptsPayments =>
-        Status is InvoiceStatus.Sent or InvoiceStatus.PartiallyPaid or InvoiceStatus.Overdue;
+        (TradeDetails?.DefaultPayable ?? true)
+        && Status is InvoiceStatus.Sent or InvoiceStatus.PartiallyPaid or InvoiceStatus.Overdue;
+
+    /// <summary>An import/export document. Derived from the discriminator, never stored twice.</summary>
+    public bool IsTradeDocument => Type == InvoiceType.ImportExport;
 }

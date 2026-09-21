@@ -22,6 +22,7 @@
 /invoices/new          /invoices/new          200
 /products/new          /products/new          200
 /quotations/new        /quotations/new        200
+/import-export/new     /import-export/new     200
 
 # ---- customer-facing links (the ones that get shared) --------------------
 /q/:token              /q/token               200
@@ -35,3 +36,5 @@
 /products/:id/edit     /products/id/edit      200
 /quotations/:id/edit   /quotations/id/edit    200
 /quotations/:id        /quotations/id         200
+/import-export/:id/edit  /import-export/id/edit  200
+/import-export/:id       /import-export/id       200

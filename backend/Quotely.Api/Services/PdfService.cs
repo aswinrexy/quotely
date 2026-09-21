@@ -12,6 +12,13 @@ public interface IPdfService
 {
     GeneratedPdf Generate(Quotation quotation, BusinessProfile? business);
     GeneratedPdf GenerateInvoice(Invoice invoice, BusinessProfile? business);
+
+    /// <summary>
+    /// The import/export layout. A separate entry point rather than a branch inside
+    /// GenerateInvoice, so a domestic invoice can never be routed through the trade document by
+    /// accident and the existing method keeps behaving exactly as it did.
+    /// </summary>
+    GeneratedPdf GenerateTradeInvoice(Invoice invoice, BusinessProfile? business);
 }
 
 public class PdfService : IPdfService
@@ -54,6 +61,43 @@ public class PdfService : IPdfService
             throw new ApiException(System.Net.HttpStatusCode.InternalServerError,
                 "The invoice PDF could not be generated. Please try again.");
         }
+    }
+
+    public GeneratedPdf GenerateTradeInvoice(Invoice invoice, BusinessProfile? business)
+    {
+        try
+        {
+            var document = new TradeInvoiceDocument(invoice, business, DecodeLogo(business?.LogoUrl));
+            return new GeneratedPdf(document.GeneratePdf(), BuildTradeFileName(invoice));
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "PDF generation failed for trade invoice {InvoiceId}", invoice.Id);
+            throw new ApiException(System.Net.HttpStatusCode.InternalServerError,
+                "The import/export invoice PDF could not be generated. Please try again.");
+        }
+    }
+
+    /// <summary>
+    /// Example: PI-NAFPCL-103-26-27-Root-Express.pdf
+    ///
+    /// Named after the exporter's own document number when they keep one, because that is the
+    /// reference their buyer, bank and forwarder will quote back at them — not Quotely's INV-.
+    /// </summary>
+    public static string BuildTradeFileName(Invoice invoice)
+    {
+        var details = invoice.TradeDetails;
+        var prefix = details?.DocumentType == Models.TradeDocumentType.CommercialInvoice ? "CI" : "PI";
+
+        var number = Slug(string.IsNullOrWhiteSpace(details?.DocumentNumber)
+            ? invoice.InvoiceNumber
+            : details!.DocumentNumber!);
+
+        var party = Slug(details?.ConsigneeName ?? invoice.CustomerName);
+
+        return string.IsNullOrEmpty(party)
+            ? $"{prefix}-{number}.pdf"
+            : $"{prefix}-{number}-{party}.pdf";
     }
 
     /// <summary>Example: INV-000001-John-Smith.pdf</summary>
