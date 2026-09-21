@@ -363,7 +363,9 @@ export function TradeInvoiceForm({ invoice }: { invoice?: TradeInvoice }) {
   }
 
   const isExport = tradeType === "Export";
-  const partyLabel = isExport ? "Exporter" : "Importer";
+  // Both roles named: on an export the exporter IS the consignor, and on an import the importer
+  // IS the consignee. A separate consignor box would duplicate this one on almost every document.
+  const partyLabel = isExport ? "Exporter / Consignor" : "Importer / Consignee";
   const counterpartyLabel = isExport ? "Consignee" : "Supplier / Exporter";
 
   return (
@@ -564,7 +566,9 @@ export function TradeInvoiceForm({ invoice }: { invoice?: TradeInvoice }) {
                 onChange={(e) => setBuyerSameAsConsignee(e.target.checked)}
                 className="h-4 w-4 rounded border-midnight accent-electric"
               />
-              Buyer is the same as the {counterpartyLabel.toLowerCase()}
+              {/* "the consignee", not the counterparty: on an import the consignee is the importer,
+                  so naming the counterparty would claim the buyer is the overseas supplier. */}
+              Buyer is the same as the consignee
             </label>
 
             {!buyerSameAsConsignee && (

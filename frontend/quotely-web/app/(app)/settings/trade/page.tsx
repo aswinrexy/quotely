@@ -164,7 +164,7 @@ export default function TradeSettingsPage() {
           <CardBody className="space-y-5">
             <div className="grid gap-4 sm:grid-cols-2">
               <Field
-                label="Exporter name"
+                label="Exporter / importer name"
                 htmlFor="partyNameOverride"
                 hint="Only if it differs from your business profile."
               >
@@ -174,7 +174,7 @@ export default function TradeSettingsPage() {
                   onChange={(e) => set("partyNameOverride", e.target.value)}
                 />
               </Field>
-              <Field label="Exporter address" htmlFor="partyAddressOverride">
+              <Field label="Exporter / importer address" htmlFor="partyAddressOverride">
                 <Textarea
                   id="partyAddressOverride"
                   rows={2}

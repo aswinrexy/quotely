@@ -99,7 +99,7 @@ export default function TradeInvoiceDetailPage() {
   if (!invoice) return null;
 
   const isExport = invoice.tradeType === "Export";
-  const partyLabel = isExport ? "Exporter" : "Importer";
+  const partyLabel = isExport ? "Exporter / Consignor" : "Importer / Consignee";
   const counterpartyLabel = isExport ? "Consignee" : "Supplier / Exporter";
 
   return (
@@ -162,7 +162,7 @@ export default function TradeInvoiceDetailPage() {
             />
             <Party
               label="Buyer"
-              name={invoice.buyerSameAsConsignee ? `Same as ${counterpartyLabel.toLowerCase()}` : invoice.buyerName}
+              name={invoice.buyerSameAsConsignee ? "Same as consignee" : invoice.buyerName}
               address={invoice.buyerSameAsConsignee ? null : invoice.buyerAddress}
             />
             <Party

@@ -47,8 +47,16 @@ public class TradeInvoiceDocument : IDocument
 
     private bool IsExport => _details.TradeType == TradeType.Export;
 
-    /// <summary>The issuing party's label flips with the direction of trade; the storage does not.</summary>
-    private string PartyLabel => IsExport ? "Exporter" : "Importer";
+    /// <summary>
+    /// The issuing party's label flips with the direction of trade; the storage does not.
+    ///
+    /// Both roles are named because they are the same party and people arrive looking for either
+    /// word. On an export the exporter IS the consignor — it is the business sending the goods —
+    /// and on an import the importer IS the consignee. A separate box for the second name would
+    /// duplicate the first on almost every document, and a form with two boxes that always agree
+    /// is one people stop filling in carefully.
+    /// </summary>
+    private string PartyLabel => IsExport ? "Exporter / Consignor" : "Importer / Consignee";
     private string CounterpartyLabel => IsExport ? "Consignee" : "Supplier / Exporter";
     private string DestinationCountryLabel =>
         IsExport ? "Country of final destination" : "Country of import";
@@ -212,10 +220,15 @@ public class TradeInvoiceDocument : IDocument
     {
         if (_details.BuyerSameAsConsignee)
         {
+            // "Same as consignee", not "same as the counterparty". The flag means the buyer and
+            // the consignee are one party — and on an IMPORT the consignee is the importer, so
+            // naming the counterparty here would say the buyer is the overseas supplier, which is
+            // the opposite of what an import document means. The word "consignee" appears in one
+            // of the two party labels whichever direction the goods move, so it always resolves.
             container.Padding(5).Text(text =>
             {
                 text.Span("Buyer (if other than consignee): ").FontSize(7).FontColor(Muted);
-                text.Span($"Same as {CounterpartyLabel.ToLowerInvariant()}").SemiBold();
+                text.Span("Same as consignee").SemiBold();
             });
             return;
         }
