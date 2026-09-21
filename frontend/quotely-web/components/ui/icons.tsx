@@ -56,6 +56,14 @@ export const Icon = {
       <path d="M3.5 7.5 12 12l8.5-4.5M12 12v9" />
     </Svg>
   ),
+  /** A globe with a shipping route: import/export. */
+  trade: (p: IconProps) => (
+    <Svg {...p}>
+      <circle cx="12" cy="12" r="9" />
+      <path d="M3 12h18" />
+      <path d="M12 3a15 15 0 0 1 0 18a15 15 0 0 1 0-18Z" />
+    </Svg>
+  ),
   building: (p: IconProps) => (
     <Svg {...p}>
       <path d="M4 21V5.5a1 1 0 0 1 1-1h8a1 1 0 0 1 1 1V21" />

@@ -12,12 +12,14 @@ export const PRIMARY_NAV: NavItem[] = [
   { href: "/dashboard", label: "Dashboard", icon: Icon.dashboard },
   { href: "/quotations", label: "Quotations", icon: Icon.quotation },
   { href: "/invoices", label: "Invoices", icon: Icon.invoice },
+  { href: "/import-export", label: "Import / Export", icon: Icon.trade },
   { href: "/customers", label: "Customers", icon: Icon.customers },
   { href: "/products", label: "Products & Services", icon: Icon.catalogue },
 ];
 
 export const SECONDARY_NAV: NavItem[] = [
   { href: "/business-profile", label: "Business Profile", icon: Icon.building },
+  { href: "/settings/trade", label: "Import / Export Settings", icon: Icon.trade },
   { href: "/settings/payments", label: "Payments", icon: Icon.card },
   { href: "/settings/billing", label: "Billing", icon: Icon.settings },
 ];

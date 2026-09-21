@@ -18,9 +18,23 @@ public static class InvoiceCalculator
 {
     public static decimal Round(decimal value) => QuotationCalculator.Round(value);
 
+    /// <summary>
+    /// The figure the rate is multiplied by.
+    ///
+    /// For every domestic line this is simply the quantity. A trade line may instead be priced by
+    /// weight, and the distinction is not cosmetic: the reference proforma heads its rate column
+    /// "Rate/Kg" while multiplying by the package count, so a calculator that trusted the label
+    /// would turn 132 boxes at 590 into 257,004 instead of 77,880. The basis is stored on the line
+    /// precisely so this decision is never inferred from a piece of text.
+    /// </summary>
+    private static decimal PricedQuantity(InvoiceItem item) =>
+        item.TradeDetails?.RateBasis == TradeRateBasis.PerNetWeight
+            ? item.TradeDetails.NetWeight ?? 0m
+            : item.Quantity;
+
     public static void ApplyLine(InvoiceItem item)
     {
-        var gross = Round(item.Quantity * item.UnitPrice);
+        var gross = Round(PricedQuantity(item) * item.UnitPrice);
         var discount = Round(Math.Clamp(item.Discount, 0m, gross));
         var net = gross - discount;
         var tax = Round(net * item.TaxRate / 100m);

@@ -699,3 +699,209 @@ export interface Entitlements {
   customers: UsageQuota;
   products: UsageQuota;
 }
+
+// ---------------------------------------------------------------------------
+// Import / export
+//
+// A trade document is an Invoice on the server, sharing its number sequence, payments, public
+// link and tenant isolation. These types describe the extra detail, not a second invoice.
+// ---------------------------------------------------------------------------
+
+export const TRADE_TYPES = ["Export", "Import"] as const;
+export type TradeType = (typeof TRADE_TYPES)[number];
+
+export const TRADE_DOCUMENT_TYPES = ["ProformaInvoice", "CommercialInvoice"] as const;
+export type TradeDocumentType = (typeof TRADE_DOCUMENT_TYPES)[number];
+
+export const TRADE_DOCUMENT_TYPE_LABELS: Record<TradeDocumentType, string> = {
+  ProformaInvoice: "Proforma invoice",
+  CommercialInvoice: "Commercial invoice",
+};
+
+/**
+ * What the rate is multiplied by.
+ *
+ * Trade documents commonly head this column "Rate/Kg" while pricing per box, so the basis is an
+ * explicit choice rather than something inferred from the label. Getting it wrong changes the
+ * total without changing anything visible on the page.
+ */
+export const TRADE_RATE_BASES = ["PerQuantityUnit", "PerNetWeight"] as const;
+export type TradeRateBasis = (typeof TRADE_RATE_BASES)[number];
+
+/** Suggestions, not a closed list — the field accepts anything a business packs goods in. */
+export const TRADE_QUANTITY_UNITS = [
+  "BOXES",
+  "BAGS",
+  "NOS",
+  "CARTONS",
+  "PALLETS",
+  "KGS",
+  "PCS",
+  "DRUMS",
+] as const;
+
+/** Common terms, offered as suggestions. Custom values are always allowed. */
+export const TRADE_DELIVERY_TERMS = ["FOB", "CIF", "C&F", "CFR", "EXW", "DAP", "DDP", "FCA"] as const;
+export const TRADE_PAYMENT_TERMS = [
+  "T/T",
+  "Advance",
+  "LC at sight",
+  "LC 30 days",
+  "LC 60 days",
+  "30 days credit",
+  "60 days credit",
+] as const;
+
+export interface TradeLine {
+  id: string;
+  marksAndNumbers?: string | null;
+  description: string;
+  detail?: string | null;
+  dimension?: string | null;
+  hsCode?: string | null;
+  netWeight?: number | null;
+  grossWeight?: number | null;
+  quantity: number;
+  quantityUnit?: string | null;
+  rate: number;
+  rateBasis: TradeRateBasis;
+  rateLabel?: string | null;
+  discount: number;
+  taxRate: number;
+  /** Server-computed. */
+  lineTotal: number;
+}
+
+export interface TradeInvoiceListItem {
+  id: string;
+  invoiceNumber: string;
+  documentNumber: string;
+  tradeType: TradeType;
+  documentType: TradeDocumentType;
+  consigneeName: string;
+  finalDestination?: string | null;
+  invoiceDate: string;
+  status: InvoiceStatus;
+  currency: string;
+  grandTotal: number;
+  totalPackages: number;
+  totalNetWeight: number;
+  /** False for every proforma — the UI reads this rather than deciding for itself. */
+  isPayable: boolean;
+}
+
+export interface TradeInvoice {
+  id: string;
+  invoiceNumber: string;
+  documentNumber?: string | null;
+  tradeType: TradeType;
+  documentType: TradeDocumentType;
+
+  invoiceDate: string;
+  dueDate: string;
+  status: InvoiceStatus;
+  canEdit: boolean;
+  canEditItems: boolean;
+  canDelete: boolean;
+  isPayable: boolean;
+
+  customerId: string;
+
+  buyerOrderNumber?: string | null;
+  buyerOrderDate?: string | null;
+  otherReferences?: string | null;
+
+  partyName: string;
+  partyAddress?: string | null;
+  consigneeName: string;
+  consigneeAddress?: string | null;
+  buyerSameAsConsignee: boolean;
+  buyerName?: string | null;
+  buyerAddress?: string | null;
+  notifyPartyName?: string | null;
+  notifyPartyAddress?: string | null;
+
+  preCarriageBy?: string | null;
+  placeOfReceipt?: string | null;
+  vesselOrFlightNumber?: string | null;
+  portOfLoading?: string | null;
+  portOfDischarge?: string | null;
+  finalDestination?: string | null;
+  countryOfOrigin?: string | null;
+  countryOfFinalDestination?: string | null;
+
+  termsOfDelivery?: string | null;
+  termsOfPayment?: string | null;
+  pricingTerm?: string | null;
+
+  iecNumber?: string | null;
+  gstNumber?: string | null;
+  panNumber?: string | null;
+  apedaRegistrationNumber?: string | null;
+  apedaValidUntil?: string | null;
+
+  headerDeclarations?: string | null;
+  footerDeclaration?: string | null;
+  authorisedSignatory?: string | null;
+
+  currency: string;
+  subtotal: number;
+  discountTotal: number;
+  taxTotal: number;
+  grandTotal: number;
+  totalNetWeight: number;
+  totalGrossWeight: number;
+  totalPackages: number;
+  weightUnit: string;
+  amountInWords: string;
+
+  hasPublicLink: boolean;
+  notes?: string | null;
+
+  business?: BusinessProfile | null;
+  items: TradeLine[];
+}
+
+export interface TradeProfile {
+  iecNumber?: string | null;
+  gstNumber?: string | null;
+  panNumber?: string | null;
+  apedaRegistrationNumber?: string | null;
+  apedaValidUntil?: string | null;
+  partyNameOverride?: string | null;
+  partyAddressOverride?: string | null;
+  defaultCountryOfOrigin?: string | null;
+  defaultTermsOfDelivery?: string | null;
+  defaultTermsOfPayment?: string | null;
+  defaultPricingTerm?: string | null;
+  defaultPortOfLoading?: string | null;
+  defaultPreCarriageBy?: string | null;
+  defaultHeaderDeclarations?: string | null;
+  defaultFooterDeclaration?: string | null;
+  defaultAuthorisedSignatory?: string | null;
+  defaultCurrency?: string | null;
+  /** Wording Quotely offers. The business decides what its own document declares. */
+  suggestedHeaderDeclarations: string[];
+  suggestedFooterDeclaration: string;
+}
+
+export interface TradeInvoiceDefaults {
+  partyName?: string | null;
+  partyAddress?: string | null;
+  countryOfOrigin?: string | null;
+  termsOfDelivery?: string | null;
+  termsOfPayment?: string | null;
+  pricingTerm?: string | null;
+  portOfLoading?: string | null;
+  preCarriageBy?: string | null;
+  iecNumber?: string | null;
+  gstNumber?: string | null;
+  panNumber?: string | null;
+  apedaRegistrationNumber?: string | null;
+  apedaValidUntil?: string | null;
+  headerDeclarations?: string | null;
+  footerDeclaration?: string | null;
+  authorisedSignatory?: string | null;
+  currency: string;
+  suggestedDocumentNumber: string;
+}

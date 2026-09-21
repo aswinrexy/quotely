@@ -201,7 +201,12 @@ public class InvoiceService : IInvoiceService
         pageSize = Math.Clamp(pageSize, 1, 100);
 
         // Every query starts from the authenticated user's rows.
-        var query = _db.Invoices.AsNoTracking().Where(i => i.UserId == userId);
+        //
+        // Standard invoices only. Import/export documents are invoices and share this entity, but
+        // they have their own list with their own columns — consignee, destination, packages — and
+        // a proforma offering a future shipment does not belong in a list of what customers owe.
+        var query = _db.Invoices.AsNoTracking()
+            .Where(i => i.UserId == userId && i.Type == InvoiceType.Standard);
 
         if (!string.IsNullOrWhiteSpace(search))
         {
@@ -255,7 +260,16 @@ public class InvoiceService : IInvoiceService
         needsAttention = Math.Clamp(needsAttention, 0, 20);
         var today = Today;
 
-        var mine = _db.Invoices.AsNoTracking().Where(i => i.UserId == userId);
+        // Receivables count what is genuinely owed, which is NOT the same filter as the list above.
+        //
+        // A commercial trade invoice is a real demand for payment and belongs in this total. A
+        // proforma is an offer describing a shipment that has not happened; counting it would
+        // overstate what the business is owed, and it is the figure they look at to decide whether
+        // they can pay their own bills. So the filter is payability, not document type.
+        var mine = _db.Invoices.AsNoTracking()
+            .Where(i => i.UserId == userId)
+            .Where(i => i.TradeDetails == null
+                        || i.TradeDetails.DocumentType == TradeDocumentType.CommercialInvoice);
 
         var unpaid = mine.Unpaid();
         var overdue = mine.Overdue(today);

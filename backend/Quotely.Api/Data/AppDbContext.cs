@@ -22,6 +22,11 @@ public class AppDbContext : IdentityDbContext<AppUser, IdentityRole<Guid>, Guid>
     public DbSet<WebhookEvent> WebhookEvents => Set<WebhookEvent>();
     public DbSet<MerchantPaymentConnection> MerchantPaymentConnections => Set<MerchantPaymentConnection>();
 
+    // ---- import/export. Extra detail hanging off the existing invoice, never a second invoice.
+    public DbSet<TradeInvoiceDetails> TradeInvoiceDetails => Set<TradeInvoiceDetails>();
+    public DbSet<TradeLineDetails> TradeLineDetails => Set<TradeLineDetails>();
+    public DbSet<TradeProfile> TradeProfiles => Set<TradeProfile>();
+
     // ---- Quotely's own SaaS billing. A different kind of money from everything above: these
     // ---- are businesses paying US, not customers paying them.
     public DbSet<Subscription> Subscriptions => Set<Subscription>();
@@ -140,6 +145,9 @@ public class AppDbContext : IdentityDbContext<AppUser, IdentityRole<Guid>, Guid>
             e.HasIndex(x => new { x.UserId, x.InvoiceNumber }).IsUnique();
             e.HasIndex(x => new { x.UserId, x.Sequence }).IsUnique();
             e.HasIndex(x => new { x.UserId, x.Status });
+            // The import/export list filters on this constantly; the standard list never does,
+            // and a composite with UserId keeps both cheap.
+            e.HasIndex(x => new { x.UserId, x.Type });
             // One invoice per quotation: enforced in the database, not only in the service, so a
             // concurrent double conversion cannot slip two invoices through. QuotationId is
             // nullable since V2.4, and EF filters the index to non-null values — directly raised
@@ -174,6 +182,10 @@ public class AppDbContext : IdentityDbContext<AppUser, IdentityRole<Guid>, Guid>
                 .HasForeignKey<Invoice>(x => x.QuotationId).OnDelete(DeleteBehavior.Restrict);
             e.HasOne(x => x.Customer).WithMany(c => c.Invoices)
                 .HasForeignKey(x => x.CustomerId).OnDelete(DeleteBehavior.Restrict);
+            // Cascade: the trade detail has no meaning without its invoice, and an invoice that
+            // can be deleted must not be blocked by it.
+            e.HasOne(x => x.TradeDetails).WithOne(t => t.Invoice)
+                .HasForeignKey<TradeInvoiceDetails>(x => x.InvoiceId).OnDelete(DeleteBehavior.Cascade);
         });
 
         b.Entity<Payment>(e =>
@@ -215,6 +227,92 @@ public class AppDbContext : IdentityDbContext<AppUser, IdentityRole<Guid>, Guid>
             // and payments already disappear with their invoice.
             e.HasOne<AppUser>().WithMany(u => u.Payments)
                 .HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.NoAction);
+        });
+
+        // ---- import/export -------------------------------------------------
+        b.Entity<TradeInvoiceDetails>(e =>
+        {
+            // One detail row per invoice. In the database, not only in the service, so a retried
+            // request cannot leave a document with two sets of shipping facts.
+            e.HasIndex(x => x.InvoiceId).IsUnique();
+
+            e.Property(x => x.DocumentNumber).HasMaxLength(60);
+            e.Property(x => x.BuyerOrderNumber).HasMaxLength(60);
+            e.Property(x => x.OtherReferences).HasMaxLength(400);
+
+            e.Property(x => x.PartyName).HasMaxLength(200).IsRequired();
+            e.Property(x => x.PartyAddress).HasMaxLength(600);
+            e.Property(x => x.ConsigneeName).HasMaxLength(200).IsRequired();
+            e.Property(x => x.ConsigneeAddress).HasMaxLength(600);
+            e.Property(x => x.BuyerName).HasMaxLength(200);
+            e.Property(x => x.BuyerAddress).HasMaxLength(600);
+            e.Property(x => x.NotifyPartyName).HasMaxLength(200);
+            e.Property(x => x.NotifyPartyAddress).HasMaxLength(600);
+
+            e.Property(x => x.PreCarriageBy).HasMaxLength(120);
+            e.Property(x => x.PlaceOfReceipt).HasMaxLength(160);
+            e.Property(x => x.VesselOrFlightNumber).HasMaxLength(120);
+            e.Property(x => x.PortOfLoading).HasMaxLength(160);
+            e.Property(x => x.PortOfDischarge).HasMaxLength(160);
+            e.Property(x => x.FinalDestination).HasMaxLength(160);
+            e.Property(x => x.CountryOfOrigin).HasMaxLength(120);
+            e.Property(x => x.CountryOfFinalDestination).HasMaxLength(120);
+
+            e.Property(x => x.TermsOfDelivery).HasMaxLength(300);
+            e.Property(x => x.TermsOfPayment).HasMaxLength(300);
+            e.Property(x => x.PricingTerm).HasMaxLength(40);
+
+            e.Property(x => x.IecNumber).HasMaxLength(40);
+            e.Property(x => x.GstNumber).HasMaxLength(40);
+            e.Property(x => x.PanNumber).HasMaxLength(40);
+            e.Property(x => x.ApedaRegistrationNumber).HasMaxLength(60);
+
+            // Long enough for several lines of declaration without inviting an essay.
+            e.Property(x => x.HeaderDeclarations).HasMaxLength(2000);
+            e.Property(x => x.FooterDeclaration).HasMaxLength(2000);
+            e.Property(x => x.AuthorisedSignatory).HasMaxLength(200);
+
+            // Weights to three places: agricultural consignments are quoted in fractional kilos.
+            e.Property(x => x.TotalNetWeight).HasPrecision(18, 3);
+            e.Property(x => x.TotalGrossWeight).HasPrecision(18, 3);
+            e.Property(x => x.TotalPackages).HasPrecision(18, 3);
+            e.Property(x => x.WeightUnit).HasMaxLength(20).IsRequired();
+        });
+
+        b.Entity<TradeLineDetails>(e =>
+        {
+            e.HasIndex(x => x.InvoiceItemId).IsUnique();
+            e.Property(x => x.MarksAndNumbers).HasMaxLength(120);
+            e.Property(x => x.Dimension).HasMaxLength(120);
+            // Text, never numeric: HS codes are fixed-width and carry leading zeros.
+            e.Property(x => x.HsCode).HasMaxLength(30);
+            e.Property(x => x.NetWeight).HasPrecision(18, 3);
+            e.Property(x => x.GrossWeight).HasPrecision(18, 3);
+            e.Property(x => x.QuantityUnit).HasMaxLength(40);
+            e.Property(x => x.RateLabel).HasMaxLength(80);
+        });
+
+        b.Entity<TradeProfile>(e =>
+        {
+            e.HasIndex(x => x.UserId).IsUnique();
+            e.Property(x => x.IecNumber).HasMaxLength(40);
+            e.Property(x => x.GstNumber).HasMaxLength(40);
+            e.Property(x => x.PanNumber).HasMaxLength(40);
+            e.Property(x => x.ApedaRegistrationNumber).HasMaxLength(60);
+            e.Property(x => x.PartyNameOverride).HasMaxLength(200);
+            e.Property(x => x.PartyAddressOverride).HasMaxLength(600);
+            e.Property(x => x.DefaultCountryOfOrigin).HasMaxLength(120);
+            e.Property(x => x.DefaultTermsOfDelivery).HasMaxLength(300);
+            e.Property(x => x.DefaultTermsOfPayment).HasMaxLength(300);
+            e.Property(x => x.DefaultPricingTerm).HasMaxLength(40);
+            e.Property(x => x.DefaultPortOfLoading).HasMaxLength(160);
+            e.Property(x => x.DefaultPreCarriageBy).HasMaxLength(120);
+            e.Property(x => x.DefaultHeaderDeclarations).HasMaxLength(2000);
+            e.Property(x => x.DefaultFooterDeclaration).HasMaxLength(2000);
+            e.Property(x => x.DefaultAuthorisedSignatory).HasMaxLength(200);
+            e.Property(x => x.DefaultCurrency).HasMaxLength(3);
+            e.HasOne(x => x.User).WithMany()
+                .HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Cascade);
         });
 
         b.Entity<MerchantPaymentConnection>(e =>
@@ -338,6 +436,8 @@ public class AppDbContext : IdentityDbContext<AppUser, IdentityRole<Guid>, Guid>
             e.Property(x => x.LineTotal).HasPrecision(18, 2);
             e.HasOne(x => x.Invoice).WithMany(i => i.Items)
                 .HasForeignKey(x => x.InvoiceId).OnDelete(DeleteBehavior.Cascade);
+            e.HasOne(x => x.TradeDetails).WithOne(t => t.InvoiceItem)
+                .HasForeignKey<TradeLineDetails>(x => x.InvoiceItemId).OnDelete(DeleteBehavior.Cascade);
         });
 
         b.Entity<QuotationItem>(e =>
