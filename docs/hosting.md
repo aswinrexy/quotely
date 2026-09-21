@@ -677,7 +677,7 @@ https://www.quotely4you.org        → 301 to the apex    (Redirect Rule, query 
 https://api.quotely4you.org        → Render             (DNS only — see below)
 https://quotely4you.org/q/{token}  → public quotation   (a frontend route)
 https://quotely4you.org/i/{token}  → public invoice     (a frontend route)
-support@quotely4you.org            → Cloudflare Email Routing
+quotely4yousupport@gmail.com       → the published support address
 ```
 
 `PublicLinks__BaseUrl` must point at the **frontend**. Pointing it at `api.` produces share links

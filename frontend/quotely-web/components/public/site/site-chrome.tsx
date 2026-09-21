@@ -25,7 +25,7 @@ import Link from "next/link";
  */
 export const COMPANY = {
   legalName: "Quotely",
-  email: "support@quotely4you.org",
+  email: "quotely4yousupport@gmail.com",
   phone: "+91 85475 91966",
   addressLines: ["Kerala", "India"],
   supportHours: "Monday to Friday, 10:00–18:00 IST",
