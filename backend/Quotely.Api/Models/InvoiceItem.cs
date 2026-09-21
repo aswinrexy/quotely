@@ -24,4 +24,10 @@ public class InvoiceItem
     public decimal LineSubtotal { get; set; }
     public decimal LineTax { get; set; }
     public decimal LineTotal { get; set; }
+
+    /// <summary>
+    /// Shipping facts for a goods line on an import/export invoice: marks, HS code, weights and
+    /// what the rate is quoted against. Null on every domestic line, which is most of them.
+    /// </summary>
+    public TradeLineDetails? TradeDetails { get; set; }
 }

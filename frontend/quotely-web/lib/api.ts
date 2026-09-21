@@ -81,6 +81,8 @@ export const api = {
 
   /** Downloads a generated invoice PDF. */
   downloadInvoicePdf: (invoiceId: string) => downloadPdfFrom(`/api/invoices/${invoiceId}/pdf`),
+  downloadTradeInvoicePdf: (invoiceId: string) =>
+    downloadPdfFrom(`/api/import-export/invoices/${invoiceId}/pdf`),
 };
 
 async function downloadPdfFrom(path: string): Promise<{ blob: Blob; fileName: string }> {
